@@ -1,0 +1,54 @@
+---
+# ══════════════════════════════════════════════════════════════════════════════
+# Worker Consumer Deployment
+#
+# Purpose: Reads write operations from Redis Stream and batches them to MongoDB.
+# This allows the API to handle 10K concurrent users against a 100 IOPS MongoDB.
+# ══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: assessment
+  labels:
+    app: worker
+    assessment: "true"
+spec:
+  replicas: 2  # Multiple workers for redundancy and throughput
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        assessment: "true"
+    spec:
+      containers:
+        - name: worker
+          image: assessment/worker:latest
+          imagePullPolicy: Never
+          env:
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/assessmentdb"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: BATCH_SIZE
+              value: "100"  # Writes per batch
+            - name: FLUSH_INTERVAL
+              value: "1.0"  # Seconds between flushes
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          # No readiness/liveness probes needed for worker
+          # It will retry connections automatically

@@ -1,0 +1,82 @@
+---
+# ══════════════════════════════════════════════════════════════════════════════
+# Redis Deployment - Cache and Message Queue
+#
+# Purpose:
+#   - Read caching (reduces MongoDB load)
+#   - Write queue via Redis Streams (decouples write pressure)
+#
+# Note: Using single instance for simplicity. For production, consider Redis
+# Sentinel or Cluster for HA.
+# ══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: assessment
+  labels:
+    app: redis
+    assessment: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        assessment: "true"
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          args:
+            # Memory optimization for container environment
+            - "--maxmemory"
+            - "400mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
+            # Save less frequently to reduce I/O
+            - "--save"
+            - ""
+            # Append-only mode for stream durability
+            - "--appendonly"
+            - "yes"
+            - "--appendfsync"
+            - "everysec"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir:
+            sizeLimit: 500Mi

@@ -1,0 +1,127 @@
+---
+# ══════════════════════════════════════════════════════════════════════════════
+# Python Application Deployment (FastAPI + Uvicorn) - OPTIMIZED
+#
+# Optimizations:
+#   - Increased replicas (10) to handle 10K concurrent connections
+#   - Added Redis environment variables
+#   - Tuned resource limits
+# ══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-python
+  namespace: assessment
+  labels:
+    app: app-python
+    language: python
+    assessment: "true"
+spec:
+  replicas: 10  # Increased from 1 to handle 10K concurrent users
+  selector:
+    matchLabels:
+      app: app-python
+  template:
+    metadata:
+      labels:
+        app: app-python
+        language: python
+    spec:
+      containers:
+        - name: app-python
+          image: assessment/app-python:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/assessmentdb"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: CACHE_TTL
+              value: "60"
+            - name: APP_PORT
+              value: "8000"
+          resources:
+            requests:
+              memory: "256Mi"  # Increased for multi-worker setup
+              cpu: "500m"
+            limits:
+              memory: "512Mi"
+              cpu: "2000m"  # Allow burst for multiple uvicorn workers
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 5
+---
+# ══════════════════════════════════════════════════════════════════════════════
+# Node.js Application Deployment (Express) - Also updated for consistency
+# ══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-nodejs
+  namespace: assessment
+  labels:
+    app: app-nodejs
+    language: nodejs
+    assessment: "true"
+spec:
+  replicas: 10  # Increased from 1
+  selector:
+    matchLabels:
+      app: app-nodejs
+  template:
+    metadata:
+      labels:
+        app: app-nodejs
+        language: nodejs
+    spec:
+      containers:
+        - name: app-nodejs
+          image: assessment/app-nodejs:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/assessmentdb"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: APP_PORT
+              value: "3000"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "512Mi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 5
