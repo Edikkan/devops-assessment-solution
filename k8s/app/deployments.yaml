@@ -1,11 +1,11 @@
 ---
 # ══════════════════════════════════════════════════════════════════════════════
-# Python Application Deployment (FastAPI + Uvicorn) - OPTIMIZED
+# Python Application Deployment (FastAPI + Uvicorn) - OPTIMIZED for 8GB/4CPU VM
 #
 # Optimizations:
-#   - Increased replicas (10) to handle 10K concurrent connections
-#   - Added Redis environment variables
-#   - Tuned resource limits
+#   - Fixed 10 replicas (no HPA to prevent resource exhaustion)
+#   - REDUCED connection pool to prevent MongoDB "too many open files"
+#   - Lower resource requests to fit in 8GB VM
 #   - 4 uvicorn workers per pod to saturate CPU cores
 # ══════════════════════════════════════════════════════════════════════════════
 apiVersion: apps/v1
@@ -18,7 +18,7 @@ metadata:
     language: python
     assessment: "true"
 spec:
-  replicas: 10  # Increased from 1 to handle 10K concurrent users
+  replicas: 10  # FIXED: No HPA, exactly 10 replicas for 8GB VM
   selector:
     matchLabels:
       app: app-python
@@ -45,16 +45,21 @@ spec:
               value: "60"
             - name: APP_PORT
               value: "8000"
-            # CRITICAL FIX: Add uvicorn workers to utilize multiple CPU cores
+            # CRITICAL FIX: Limit MongoDB connections for single instance
+            - name: MONGO_MAX_POOL_SIZE
+              value: "5"  # Reduced from 50
+            - name: MONGO_MIN_POOL_SIZE
+              value: "2"  # Reduced from 10
+            # Uvicorn workers
             - name: UVICORN_WORKERS
               value: "4"
           resources:
             requests:
-              memory: "128Mi"  # Increased for multi-worker setup
-              cpu: "250m"
+              memory: "128Mi"  # REDUCED from 256Mi for 8GB VM
+              cpu: "250m"        # REDUCED from 500m
             limits:
-              memory: "256Mi"
-              cpu: "1000m"  # Allow burst for multiple uvicorn workers
+              memory: "256Mi"  # REDUCED from 512Mi
+              cpu: "1000m"     # REDUCED from 2000m
           readinessProbe:
             httpGet:
               path: /readyz
