@@ -84,7 +84,6 @@ spec:
                 - sh
                 - -c
                 - |
-                  # Check Redis connectivity using Python since redis-cli is available
                   python -c "
 import redis, sys
 try:
