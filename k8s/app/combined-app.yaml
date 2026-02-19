@@ -7,7 +7,7 @@ metadata:
   labels:
     app: app-python
 spec:
-  replicas: 15  # INCREASED: Fixed replicas to handle 10k VUs instantly
+  replicas: 15
   selector:
     matchLabels:
       app: app-python
@@ -38,19 +38,17 @@ spec:
             httpGet:
               path: /readyz
               port: 8000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 15 # Give Python time to load modules
             periodSeconds: 5
-            failureThreshold: 20
+            failureThreshold: 20    # Allows up to 100s for DB handshakes
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 20
-            periodSeconds: 20
-            failureThreshold: 20
-
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 10
 ---
-
 # ── Service ──────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
@@ -64,10 +62,8 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 8000
-
 ---
-
-# ── Ingress (Tuned for High Concurrency) ──────────────────────────────────────
+# ── Ingress ──────────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -75,9 +71,7 @@ metadata:
   namespace: assessment
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    # TUNING: Increase timeouts to prevent EOF during DB lag
     traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.idleTimeout: 60s
 spec:
   rules:
     - host: assessment.local
