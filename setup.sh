@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════
-#  DevOps Assessment — Cluster Bootstrap Script (OPTIMIZED VERSION)
-#
-#  What it does:
-#    1. Creates a k3d cluster with a local image registry
-#    2. Builds all app images (Python, Node.js, Worker)
-#    3. Imports images into the cluster
-#    4. Applies all Kubernetes manifests in order
-#    5. Waits for all pods to be ready
-#    6. Prints access instructions
+#  DevOps Assessment — Cluster Bootstrap Script (STAGED ROLLOUT VERSION)
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -24,9 +16,9 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()     { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 # ── Pre-flight checks ─────────────────────────────────────────────────────────
-command -v k3d     >/dev/null 2>&1 || die "k3d not found. Follow the install instructions in README.md."
-command -v kubectl >/dev/null 2>&1 || die "kubectl not found. Follow the install instructions in README.md."
-command -v docker  >/dev/null 2>&1 || die "docker not found. Docker must be running."
+command -v k3d     >/dev/null 2>&1 || die "k3d not found."
+command -v kubectl >/dev/null 2>&1 || die "kubectl not found."
+command -v docker  >/dev/null 2>&1 || die "docker not found."
 
 info "All prerequisites found."
 
@@ -43,7 +35,6 @@ else
   success "Cluster created."
 fi
 
-# Set kubectl context
 kubectl config use-context "k3d-${CLUSTER_NAME}"
 
 # ── Build & push Docker images ────────────────────────────────────────────────
@@ -52,36 +43,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 info "Building Python app image..."
 docker build -t "assessment/app-python:latest" "${SCRIPT_DIR}/app-python/"
 k3d image import "assessment/app-python:latest" --cluster "${CLUSTER_NAME}"
-success "Python image imported."
 
 info "Building Worker image..."
 docker build -t "assessment/worker:latest" "${SCRIPT_DIR}/worker/"
 k3d image import "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
-success "Worker image imported."
 
 # ── Apply manifests ───────────────────────────────────────────────────────────
-info "Applying Kubernetes manifests..."
-
+info "Applying Namespace and Databases..."
 kubectl apply -f "${SCRIPT_DIR}/k8s/base/namespace.yaml"
+# Ensure HPA is gone so it doesn't fight our manual scaling
+kubectl delete hpa --all -n "${NAMESPACE}" --ignore-not-found=true
+
 kubectl apply -f "${SCRIPT_DIR}/k8s/mongodb/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/redis/"
+
+info "Waiting for Databases to stabilize..."
+kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=180s
+kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
+
+# Give MongoDB a 10s "Grace Period" to initialize internal engines
+info "Warming up Database engines..."
+sleep 10
+
+info "Applying Worker and App (Staged Rollout)..."
 kubectl apply -f "${SCRIPT_DIR}/k8s/worker/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/app/"
 
-success "Manifests applied."
+# Step 1: Scale to 1 replica to establish initial connections safely
+info "Scaling Python app to 1 (Canary phase)..."
+kubectl scale deployment app-python -n "${NAMESPACE}" --replicas=1
+kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=120s
 
-# ── Wait for pods ─────────────────────────────────────────────────────────────
-info "Waiting for MongoDB to be ready (this may take ~60 s)..."
-kubectl rollout status deployment/mongo -n "${NAMESPACE}" --timeout=180s
-
-info "Waiting for Redis to be ready..."
-kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
-
-info "Waiting for Worker to be ready..."
-kubectl rollout status deployment/worker -n "${NAMESPACE}" --timeout=120s
-
-info "Waiting for Python app to be ready..."
-kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=180s
+# Step 2: Scale to full capacity (15 replicas) now that Mongo is ready for the herd
+info "Scaling Python app to 15 (Full capacity)..."
+kubectl scale deployment app-python -n "${NAMESPACE}" --replicas=15
+kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=300s
 
 success "All deployments are ready!"
 
@@ -91,23 +87,11 @@ echo -e "${GREEN}═════════════════════
 echo -e "${GREEN}  Assessment Environment Ready!${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo ""
-echo "  Add this to /etc/hosts (or C:\\Windows\\System32\\drivers\\etc\\hosts):"
-echo ""
-echo -e "    ${YELLOW}127.0.0.1  assessment.local${NC}"
-echo ""
 echo "  Endpoints:"
-echo "    Health   : http://assessment.local/healthz"
-echo "    Readiness: http://assessment.local/readyz"
 echo "    API      : http://assessment.local/api/data"
 echo "    Stats    : http://assessment.local/api/stats"
 echo ""
 echo "  To run the stress test:"
 echo "    k6 run stress-test/stress-test.js"
-echo ""
-echo "  Monitoring commands:"
-echo "    kubectl get pods -n ${NAMESPACE} -w"
-echo "    kubectl logs -n ${NAMESPACE} deploy/worker -f"
-echo "    kubectl logs -n ${NAMESPACE} deploy/redis -f"
-echo "    kubectl logs -n ${NAMESPACE} deploy/app-python -f"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
