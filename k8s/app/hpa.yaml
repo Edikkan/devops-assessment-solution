@@ -32,14 +32,14 @@ spec:
           averageUtilization: 70
   behavior:
     scaleUp:
-      stabilizationWindowSeconds: 30
+      stabilizationWindowSeconds: 60  # Wait 60s before scaling up to avoid thrashing
       policies:
         - type: Percent
-          value: 100
-          periodSeconds: 15
+          value: 50  # Scale up by max 50% at a time
+          periodSeconds: 60
     scaleDown:
-      stabilizationWindowSeconds: 300
+      stabilizationWindowSeconds: 300  # Wait 5min before scaling down
       policies:
         - type: Percent
-          value: 10
+          value: 10  # Scale down slowly
           periodSeconds: 60
