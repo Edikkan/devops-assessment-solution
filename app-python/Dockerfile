@@ -42,12 +42,11 @@ USER appuser
 EXPOSE 8000
 
 # High-concurrency Uvicorn configuration
+# FIXED: Removed --keep-alive (doesn't exist), kept --timeout-keep-alive
 CMD ["uvicorn", "main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
      "--workers", "4", \
      "--loop", "uvloop", \
      "--http", "httptools", \
-     "--keep-alive", "5", \
      "--timeout-keep-alive", "30"]
-
