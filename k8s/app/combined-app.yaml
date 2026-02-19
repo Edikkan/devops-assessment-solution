@@ -1,11 +1,8 @@
-# ── API Deployment ────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-python
   namespace: assessment
-  labels:
-    app: app-python
 spec:
   replicas: 15
   selector:
@@ -20,33 +17,22 @@ spec:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
-          env:
-            - name: MONGO_MAX_POOL_SIZE
-              value: "2"
           resources:
-            requests:
-              memory: "256Mi"
-              cpu: "400m"
+            limits: { memory: "512Mi", cpu: "800m" }
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8000
+            httpGet: { path: /readyz, port: 8000 }
             initialDelaySeconds: 20
             periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8000
-            initialDelaySeconds: 60
+            failureThreshold: 20 # Allow pods to be busy
+            timeoutSeconds: 5
 ---
-# ── Worker Deployment (Increased for Speed) ───────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
   namespace: assessment
 spec:
-  replicas: 3 # Increased to 3 to clear the 32k Redis backlog faster
+  replicas: 5 # Scale to clear 142k backlog
   selector:
     matchLabels:
       app: worker
@@ -59,11 +45,20 @@ spec:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
-          env:
-            - name: BATCH_SIZE
-              value: "1000"
 ---
-# ── Ingress (Tuned for High Concurrency) ──────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-python
+  namespace: assessment
+spec:
+  selector:
+    app: app-python
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -71,10 +66,7 @@ metadata:
   namespace: assessment
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Tuning timeouts to prevent EOF
     traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.writeTimeout: 60s
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.idleTimeout: 60s
 spec:
   rules:
     - host: assessment.local
@@ -83,7 +75,4 @@ spec:
           - path: /
             pathType: Prefix
             backend:
-              service:
-                name: app-python
-                port:
-                  number: 80
+              service: { name: app-python, port: { number: 80 } }
