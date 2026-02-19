@@ -1,100 +1,21 @@
-# ════════════════════════════════════════════════════════════════════════════
-# Worker Consumer Deployment
-# Purpose: Reads write operations from Redis Stream and batches them to MongoDB.
-# This allows the API to handle 10K concurrent users against a 100 IOPS MongoDB.
-# ════════════════════════════════════════════════════════════════════════════
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
   namespace: assessment
-  labels:
-    app: worker
-    assessment: "true"
 spec:
-  replicas: 4  # INCREASED from 2 for faster processing
-  selector:
-    matchLabels:
-      app: worker
+  replicas: 2 # Only 2 workers to avoid lock contention
   template:
-    metadata:
-      labels:
-        app: worker
-        assessment: "true"
     spec:
-      initContainers:
-        - name: wait-for-redis
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for Redis at redis:6379..."
-              until nc -z redis 6379; do
-                echo "Redis not ready yet, waiting..."
-                sleep 2
-              done
-              echo "Redis is ready!"
-        - name: wait-for-mongo
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for MongoDB at mongo:27017..."
-              until nc -z mongo 27017; do
-                echo "MongoDB not ready yet, waiting..."
-                sleep 2
-              done
-              echo "MongoDB is ready!"
-      
       containers:
         - name: worker
           image: assessment/worker:latest
-          imagePullPolicy: Never
           env:
-            - name: MONGO_URI
-              value: "mongodb://mongo:27017/assessmentdb"
-            - name: REDIS_HOST
-              value: "redis"
-            - name: REDIS_PORT
-              value: "6379"
-            # CRITICAL FIX: Reduced batch size for faster processing
             - name: BATCH_SIZE
-              value: "50"  # REDUCED from 100
+              value: "1000" # MAXIMIZE every IOPS ticket
             - name: FLUSH_INTERVAL
-              value: "0.5"  # REDUCED from 1.0 (faster flush)
-            - name: HOSTNAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          
+              value: "1.0"
           resources:
-            requests:
-              memory: "128Mi"
-              cpu: "250m"
             limits:
-              memory: "256Mi"
-              cpu: "500m"
-          
-          readinessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - "import redis, sys; r = redis.Redis(host='redis', port=6379, socket_connect_timeout=5); r.ping(); sys.exit(0)"
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          
-          livenessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - "import redis, sys; r = redis.Redis(host='redis', port=6379, socket_connect_timeout=5); r.ping(); sys.exit(0)"
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
+              memory: "512Mi"
+              cpu: "1000m"
