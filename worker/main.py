@@ -3,22 +3,26 @@ import time
 import json
 import signal
 import sys
-import random # Added for jitter
+import random
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError, BulkWriteError
 import redis
 
-# Configuration
+# --- K8s-Safe Configuration ---
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/assessmentdb")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+# FIX: Strip 'tcp://' prefix injected by Kubernetes Service discovery
+raw_redis_port = os.getenv("REDIS_PORT", "6379")
+if "://" in raw_redis_port:
+    REDIS_PORT = int(raw_redis_port.split(":")[-1])
+else:
+    REDIS_PORT = int(raw_redis_port)
 
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000")) 
 FLUSH_INTERVAL = float(os.getenv("FLUSH_INTERVAL", "2.0")) 
-
 WRITE_STREAM = "writes"
 CONSUMER_GROUP = "mongo-writers"
 CONSUMER_NAME = os.getenv("HOSTNAME", "worker-1")
@@ -34,10 +38,8 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 def connect_mongo():
-    # JITTER: Prevents "Thundering Herd" during rollout
-    time.sleep(random.uniform(1, 5))
+    time.sleep(random.uniform(1, 3)) # Jitter to let API pods connect first
     try:
-        # maxPoolSize=2 is plenty for a worker that only does batch inserts
         client = MongoClient(MONGO_URI, maxPoolSize=2, serverSelectionTimeoutMS=10000)
         client.admin.command("ping")
         return client
@@ -47,18 +49,16 @@ def connect_mongo():
 
 def connect_redis():
     try:
+        # Note: worker uses synchronous redis client
         return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     except Exception as e:
         print(f"[redis] connection failed: {e}")
         return None
 
 def process_batch(collection, messages: List[tuple]) -> int:
-    if not messages:
-        return 0
-    
+    if not messages: return 0
     docs = []
     message_ids = []
-    
     for msg_id, fields in messages:
         try:
             data = json.loads(fields.get("data", "{}"))
@@ -68,11 +68,8 @@ def process_batch(collection, messages: List[tuple]) -> int:
         except:
             message_ids.append(msg_id)
     
-    if not docs:
-        return len(message_ids)
-    
+    if not docs: return len(message_ids)
     try:
-        # Use bulk_write or insert_many. insert_many is fine here.
         collection.insert_many(docs, ordered=False)
         return len(docs)
     except BulkWriteError as e:
@@ -82,20 +79,18 @@ def process_batch(collection, messages: List[tuple]) -> int:
         return 0
 
 def main():
-    # Retry loop to ensure it doesn't just die if Mongo is slow
     mongo_client = None
     while running and not mongo_client:
         mongo_client = connect_mongo()
-        if not mongo_client: time.sleep(5)
+        if not mongo_client: time.sleep(2)
 
     r = None
     while running and not r:
         r = connect_redis()
-        if not r: time.sleep(5)
+        if not r: time.sleep(2)
 
     if not running: return
 
-    # Ensure group exists
     try:
         r.xgroup_create(WRITE_STREAM, CONSUMER_GROUP, id="0", mkstream=True)
     except:
@@ -103,7 +98,6 @@ def main():
     
     db = mongo_client["assessmentdb"]
     col = db["records"]
-    
     pending_messages = []
     last_flush = time.time()
 
@@ -111,39 +105,23 @@ def main():
 
     while running:
         try:
-            # We use a 2s block to aggregate data in memory rather than hitting Mongo
-            response = r.xreadgroup(
-                CONSUMER_GROUP, CONSUMER_NAME, 
-                {WRITE_STREAM: ">"}, count=BATCH_SIZE, block=2000
-            )
-            
+            response = r.xreadgroup(CONSUMER_GROUP, CONSUMER_NAME, {WRITE_STREAM: ">"}, count=BATCH_SIZE, block=2000)
             if response:
                 for _, stream_messages in response:
                     for msg_id, fields in stream_messages:
                         pending_messages.append((msg_id, fields))
 
             now = time.time()
-            # Flush logic: either batch is full or time is up
             if pending_messages and (len(pending_messages) >= BATCH_SIZE or (now - last_flush) >= FLUSH_INTERVAL):
-                processed_count = process_batch(col, pending_messages)
-                
+                process_batch(col, pending_messages)
                 m_ids = [m[0] for m in pending_messages]
-                # Pipeline the ACKs in the future if Redis becomes the bottleneck
                 r.xack(WRITE_STREAM, CONSUMER_GROUP, *m_ids)
-                
-                print(f"[worker] Flushed {len(pending_messages)} messages to Mongo.")
-                
                 pending_messages = []
                 last_flush = now
-                
-                # Mandatory backoff to stay under IOPS limit
                 time.sleep(0.1) 
-
         except Exception as e:
             print(f"[worker] Loop error: {e}")
             time.sleep(2)
-
-    print("Worker stopped.")
 
 if __name__ == "__main__":
     main()
