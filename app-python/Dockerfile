@@ -1,52 +1,23 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# DevOps Assessment — Python / FastAPI (OPTIMIZED)
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ── Stage 1: Builder ──────────────────────────────────────────────────────────
 FROM python:3.11-slim AS builder
-
 WORKDIR /app
-
-# Install build dependencies for uvloop/httptools
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Install dependencies
+RUN apt-get update && apt-get install -y gcc python3-dev && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# ── Stage 2: Production ───────────────────────────────────────────────────────
 FROM python:3.11-slim
-
 WORKDIR /app
-
-# Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy application code
+COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser . .
-
-# Switch to non-root user
+ENV PATH=/home/appuser/.local/bin:$PATH
 USER appuser
 
 EXPOSE 8000
 
-# High-concurrency Uvicorn configuration
-# FIXED: Removed --keep-alive (doesn't exist), kept --timeout-keep-alive
+# 2 workers per pod is ideal for an 8vCPU VM running 10 replicas (20 workers total)
 CMD ["uvicorn", "main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "4", \
+     "--workers", "2", \
      "--loop", "uvloop", \
-     "--http", "httptools", \
-     "--timeout-keep-alive", "30"]
+     "--http", "httptools"]
