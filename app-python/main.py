@@ -4,7 +4,7 @@ DevOps Assessment API - Optimized Version
 Key optimizations:
 1. Redis caching for reads (reduces DB load)
 2. Redis Streams for async writes (decouples write pressure)
-3. Connection pooling for MongoDB and Redis
+3. Connection pooling for MongoDB and Redis (LIMITED for single MongoDB)
 4. Efficient cache hit/miss handling
 """
 
@@ -30,9 +30,13 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 APP_PORT = int(os.getenv("APP_PORT", "8000"))
 CACHE_TTL = int(os.getenv("CACHE_TTL", "60"))  # Cache TTL in seconds
 
+# CRITICAL FIX: Reduced connection pool for single MongoDB instance
+MONGO_MAX_POOL_SIZE = int(os.getenv("MONGO_MAX_POOL_SIZE", "5"))  # Reduced from 50
+MONGO_MIN_POOL_SIZE = int(os.getenv("MONGO_MIN_POOL_SIZE", "2"))  # Reduced from 10
+
 app = FastAPI(
     title="DevOps Assessment API (Optimized)",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 # Connection pools
@@ -47,7 +51,7 @@ WRITE_STREAM_MAX_LEN = 100000  # Max stream length to prevent unbounded growth
 
 
 def get_mongo_client() -> Optional[MongoClient]:
-    """Get or create MongoDB client with connection pooling."""
+    """Get or create MongoDB client with LIMITED connection pooling."""
     global mongo_client
     if mongo_client is None:
         try:
@@ -55,8 +59,8 @@ def get_mongo_client() -> Optional[MongoClient]:
                 MONGO_URI,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=10000,
-                maxPoolSize=50,  # Connection pooling
-                minPoolSize=10,
+                maxPoolSize=MONGO_MAX_POOL_SIZE,  # CRITICAL: Limited for single MongoDB
+                minPoolSize=MONGO_MIN_POOL_SIZE,
                 maxIdleTimeMS=30000,
             )
             # Verify connection
@@ -90,7 +94,7 @@ def get_redis_client() -> Optional[redis.Redis]:
                 socket_connect_timeout=5,
                 socket_timeout=5,
                 health_check_interval=30,
-                max_connections=50,  # Connection pooling
+                max_connections=20,  # Reduced for VM constraints
             )
             # Verify connection
             redis_client.ping()
@@ -116,7 +120,7 @@ async def startup_event():
     # Connect to MongoDB
     for attempt in range(1, 11):
         if get_collection() is not None:
-            print(f"[mongo] connected on attempt {attempt}")
+            print(f"[mongo] connected on attempt {attempt} (pool: {MONGO_MAX_POOL_SIZE})")
             break
         print(f"[mongo] attempt {attempt}/10 failed, retrying in 2s...")
         time.sleep(2)
