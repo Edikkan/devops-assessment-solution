@@ -1,3 +1,4 @@
+# ── Python API Deployment ─────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,10 +19,10 @@ spec:
       containers:
         - name: app-python
           image: assessment/app-python:latest
-          imagePullPolicy: Never
+          imagePullPolicy: Never # Forces k3d to use the locally imported image
           env:
             - name: MONGO_MAX_POOL_SIZE
-              value: "2"  # CRITICAL: 15 pods * 2 = 30 connections. Safe for 500MB Mongo.
+              value: "2"
             - name: CACHE_TTL
               value: "60"
             - name: UVICORN_WORKERS
@@ -37,16 +38,52 @@ spec:
             httpGet:
               path: /readyz
               port: 8000
-            initialDelaySeconds: 20 # Wait for Python and DB warm-up
+            initialDelaySeconds: 20
             periodSeconds: 10
-            failureThreshold: 10
+            failureThreshold: 15
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 40
+            initialDelaySeconds: 60
             periodSeconds: 20
 ---
+# ── Worker Deployment ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: assessment
+  labels:
+    app: worker
+spec:
+  replicas: 1 # Using 1 powerful worker to manage IOPS efficiently
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: assessment/worker:latest
+          imagePullPolicy: Never # Fixes ImagePullBackOff
+          env:
+            - name: BATCH_SIZE
+              value: "1000"
+            - name: FLUSH_INTERVAL
+              value: "2.0"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "300m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+---
+# ── Service ──────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -60,6 +97,7 @@ spec:
       port: 80
       targetPort: 8000
 ---
+# ── Ingress ──────────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
