@@ -1,0 +1,92 @@
+# ── Python App Deployment ─────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-python
+  namespace: assessment
+  labels:
+    app: app-python
+spec:
+  replicas: 15  # INCREASED: Fixed replicas to handle 10k VUs instantly
+  selector:
+    matchLabels:
+      app: app-python
+  template:
+    metadata:
+      labels:
+        app: app-python
+    spec:
+      containers:
+        - name: app-python
+          image: assessment/app-python:latest
+          imagePullPolicy: Never
+          env:
+            - name: MONGO_MAX_POOL_SIZE
+              value: "5"
+            - name: CACHE_TTL
+              value: "60"
+            - name: UVICORN_WORKERS
+              value: "2"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "400m"
+            limits:
+              memory: "512Mi"
+              cpu: "800m"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 20
+
+---
+
+# ── Service ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-python
+  namespace: assessment
+spec:
+  selector:
+    app: app-python
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+
+---
+
+# ── Ingress (Tuned for High Concurrency) ──────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: assessment-ingress
+  namespace: assessment
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # TUNING: Increase timeouts to prevent EOF during DB lag
+    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
+    traefik.ingress.kubernetes.io/transport.respondingTimeouts.idleTimeout: 60s
+spec:
+  rules:
+    - host: assessment.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-python
+                port:
+                  number: 80
