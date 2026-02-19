@@ -1,4 +1,3 @@
-# ── Python App Deployment ─────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,15 +21,15 @@ spec:
           imagePullPolicy: Never
           env:
             - name: MONGO_MAX_POOL_SIZE
-              value: "5"
+              value: "2"  # CRITICAL: 15 pods * 2 = 30 connections. Safe for 500MB Mongo.
             - name: CACHE_TTL
               value: "60"
             - name: UVICORN_WORKERS
               value: "2"
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "400m"
+              memory: "200Mi"
+              cpu: "300m"
             limits:
               memory: "512Mi"
               cpu: "800m"
@@ -38,18 +37,16 @@ spec:
             httpGet:
               path: /readyz
               port: 8000
-            initialDelaySeconds: 15 # Give Python time to load modules
-            periodSeconds: 5
-            failureThreshold: 20    # Allows up to 100s for DB handshakes
+            initialDelaySeconds: 20 # Wait for Python and DB warm-up
+            periodSeconds: 10
+            failureThreshold: 10
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 15
-            failureThreshold: 10
+            initialDelaySeconds: 40
+            periodSeconds: 20
 ---
-# ── Service ──────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -63,7 +60,6 @@ spec:
       port: 80
       targetPort: 8000
 ---
-# ── Ingress ──────────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -71,7 +67,6 @@ metadata:
   namespace: assessment
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
 spec:
   rules:
     - host: assessment.local
