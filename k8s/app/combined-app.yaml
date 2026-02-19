@@ -5,6 +5,10 @@ metadata:
   namespace: assessment
 spec:
   replicas: 15
+  strategy:
+    rollingUpdate:
+      maxSurge: 5
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: app-python
@@ -18,13 +22,18 @@ spec:
           image: assessment/app-python:latest
           imagePullPolicy: Never
           resources:
-            limits: { memory: "512Mi", cpu: "800m" }
+            requests:
+              memory: "256Mi"
+              cpu: "500m" # Increased request for better scheduling
+            limits:
+              memory: "512Mi"
+              cpu: "1000m" # Allow full core burst
           readinessProbe:
             httpGet: { path: /readyz, port: 8000 }
-            initialDelaySeconds: 20
-            periodSeconds: 10
-            failureThreshold: 20 # Allow pods to be busy
-            timeoutSeconds: 5
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 30 # Extremely high to prevent flapping
+            timeoutSeconds: 10
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,7 +41,7 @@ metadata:
   name: worker
   namespace: assessment
 spec:
-  replicas: 5 # Scale to clear 142k backlog
+  replicas: 3 # 3 is enough if they are fast
   selector:
     matchLabels:
       app: worker
@@ -45,6 +54,9 @@ spec:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
+          env:
+            - name: BATCH_SIZE
+              value: "2000" # Larger batches to reduce Mongo IOPS
 ---
 apiVersion: v1
 kind: Service
@@ -66,7 +78,9 @@ metadata:
   namespace: assessment
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
+    # Buffer tuning for 10k VUs
+    traefik.ingress.kubernetes.io/router.middlewares: assessment-ratelimit@kubernetescrd
+    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 120s
 spec:
   rules:
     - host: assessment.local
