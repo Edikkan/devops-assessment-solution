@@ -258,7 +258,7 @@ def main():
             messages = r.xreadgroup(
                 groupname=CONSUMER_GROUP,
                 consumername=CONSUMER_NAME,
-                streams={WRITE_STREAM: ">"},  ">" means undelivered messages
+                streams={WRITE_STREAM: ">"},  # ">" means undelivered messages
                 count=BATCH_SIZE,
                 block=1000,  # Block for 1 second
             )
