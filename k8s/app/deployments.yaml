@@ -6,6 +6,7 @@
 #   - Increased replicas (10) to handle 10K concurrent connections
 #   - Added Redis environment variables
 #   - Tuned resource limits
+#   - 4 uvicorn workers per pod to saturate CPU cores
 # ══════════════════════════════════════════════════════════════════════════════
 apiVersion: apps/v1
 kind: Deployment
@@ -44,6 +45,9 @@ spec:
               value: "60"
             - name: APP_PORT
               value: "8000"
+            # CRITICAL FIX: Add uvicorn workers to utilize multiple CPU cores
+            - name: UVICORN_WORKERS
+              value: "4"
           resources:
             requests:
               memory: "256Mi"  # Increased for multi-worker setup
