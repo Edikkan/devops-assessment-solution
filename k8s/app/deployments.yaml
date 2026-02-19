@@ -50,11 +50,11 @@ spec:
               value: "4"
           resources:
             requests:
-              memory: "256Mi"  # Increased for multi-worker setup
-              cpu: "500m"
+              memory: "128Mi"  # Increased for multi-worker setup
+              cpu: "250m"
             limits:
-              memory: "512Mi"
-              cpu: "2000m"  # Allow burst for multiple uvicorn workers
+              memory: "256Mi"
+              cpu: "1000m"  # Allow burst for multiple uvicorn workers
           readinessProbe:
             httpGet:
               path: /readyz
