@@ -3,19 +3,52 @@ kind: Deployment
 metadata:
   name: worker
   namespace: assessment
+  labels:
+    app: worker
+    assessment: "true"
 spec:
-  replicas: 2 # Only 2 workers to avoid lock contention
+  replicas: 2  # Fewer workers + bigger batches = higher efficiency
+  selector:
+    matchLabels:
+      app: worker # FIX: This must exist and match the template labels below
   template:
+    metadata:
+      labels:
+        app: worker # FIX: This must match the selector above
+        assessment: "true"
     spec:
+      initContainers:
+        - name: wait-for-redis
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z redis 6379; do sleep 2; done"]
+        - name: wait-for-mongo
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z mongo 27017; do sleep 2; done"]
       containers:
         - name: worker
           image: assessment/worker:latest
+          imagePullPolicy: Never
           env:
+            - name: MONGO_URI
+              value: "mongodb://mongo:27017/assessmentdb"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: REDIS_PORT
+              value: "6379"
             - name: BATCH_SIZE
-              value: "1000" # MAXIMIZE every IOPS ticket
+              value: "1000"     # Greedy Batching
             - name: FLUSH_INTERVAL
-              value: "1.0"
+              value: "2.0"      # Allow time for the batch to fill
           resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
             limits:
-              memory: "512Mi"
+              memory: "512Mi"   # Buffer for the 1000-doc batch in memory
               cpu: "1000m"
+          # Using lightweight redis-cli check instead of Python
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "-h", "redis", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
