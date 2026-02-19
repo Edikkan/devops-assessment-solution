@@ -5,35 +5,28 @@ metadata:
   namespace: assessment
 spec:
   replicas: 15
-  strategy:
-    rollingUpdate:
-      maxSurge: 5
-      maxUnavailable: 0
-  selector:
-    matchLabels:
-      app: app-python
   template:
-    metadata:
-      labels:
-        app: app-python
     spec:
       containers:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
+          env:
+            - name: UVICORN_WORKERS
+              value: "2" # With 8 cores, we can handle 30 workers across 15 pods easily
           resources:
             requests:
               memory: "256Mi"
-              cpu: "500m" # Increased request for better scheduling
+              cpu: "400m" # Guaranteed 6 full cores for the app (15 * 0.4)
             limits:
               memory: "512Mi"
-              cpu: "1000m" # Allow full core burst
+              cpu: "1500m" # Allow pods to burst if k6 isn't using the core
           readinessProbe:
             httpGet: { path: /readyz, port: 8000 }
             initialDelaySeconds: 15
-            periodSeconds: 15
-            failureThreshold: 30 # Extremely high to prevent flapping
-            timeoutSeconds: 10
+            periodSeconds: 10
+            failureThreshold: 10
+            timeoutSeconds: 3
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,52 +34,14 @@ metadata:
   name: worker
   namespace: assessment
 spec:
-  replicas: 3 # 3 is enough if they are fast
-  selector:
-    matchLabels:
-      app: worker
+  replicas: 4 # Increased workers to process the massive throughput of the F-series
   template:
-    metadata:
-      labels:
-        app: worker
     spec:
       containers:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
-          env:
-            - name: BATCH_SIZE
-              value: "2000" # Larger batches to reduce Mongo IOPS
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-python
-  namespace: assessment
-spec:
-  selector:
-    app: app-python
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8000
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: assessment-ingress
-  namespace: assessment
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Buffer tuning for 10k VUs
-    traefik.ingress.kubernetes.io/router.middlewares: assessment-ratelimit@kubernetescrd
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 120s
-spec:
-  rules:
-    - host: assessment.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: app-python, port: { number: 80 } }
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
