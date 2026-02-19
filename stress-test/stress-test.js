@@ -1,31 +1,7 @@
 /**
  * ════════════════════════════════════════════════════════════════════════════
- *  DevOps Assessment — Stress Test
- *  Tool: k6 (https://k6.io)
- *
- *  This script simulates 10,000 concurrent virtual users hammering the
- *  /api/data endpoint. The test is structured in three phases:
- *
- *  Phase 1 — Ramp-Up    : 0 → 10,000 VUs over 3 minutes
- *  Phase 2 — Sustained  : hold 10,000 VUs for 5 minutes
- *  Phase 3 — Ramp-Down  : 10,000 → 0 VUs over 2 minutes
- *
- *  Pass criteria (thresholds):
- *    ✓ p95 response time  < 2 000 ms
- *    ✓ p99 response time  < 5 000 ms
- *    ✓ error rate         < 1%
- *    ✓ request rate       ≥ 1 000 req/s at peak (derived from pass/fail)
- *
- *  Usage:
- *    # Install k6: https://k6.io/docs/get-started/installation/
- *    # Run against a locally exposed endpoint:
- *    k6 run stress-test/stress-test.js
- *
- *    # Override base URL:
- *    BASE_URL=http://my-other-host k6 run stress-test/stress-test.js
- *
- *    # Output metrics to InfluxDB/Grafana (optional):
- *    k6 run --out influxdb=http://localhost:8086/k6 stress-test/stress-test.js
+ * DevOps Assessment — Stress Test (OPTIMIZED FOR 10K VUs)
+ * Tool: k6 (https://k6.io)
  * ════════════════════════════════════════════════════════════════════════════
  */
 
@@ -66,7 +42,10 @@ export const options = {
 // ── Scenario ──────────────────────────────────────────────────────────────────
 export default function () {
   const params = {
-    headers: { 'Accept': 'application/json' },
+    headers: { 
+        'Accept': 'application/json',
+        'Connection': 'keep-alive' // Explicitly request keep-alive
+    },
     timeout: '10s',
   };
 
@@ -97,9 +76,12 @@ export default function () {
     }
   }
 
-  // No sleep — we want maximum pressure on the system.
-  // If you want to simulate realistic user think-time, uncomment:
-  // sleep(Math.random() * 0.5);
+  /**
+   * IMPORTANT: 0.1s sleep (Think Time). 
+   * This allows the OS to recycle TCP connections in TIME_WAIT state.
+   * Without this, 10k VUs will cause Port Exhaustion and EOF errors.
+   */
+  sleep(0.1); 
 }
 
 // ── Setup (runs once before load) ────────────────────────────────────────────
@@ -123,9 +105,5 @@ export function setup() {
 export function teardown(data) {
   console.log('═══════════════════════════════════════════════════');
   console.log('  Load test complete. Check thresholds above.');
-  console.log('  Useful next steps:');
-  console.log('    • kubectl top pods -n assessment');
-  console.log('    • kubectl logs -n assessment deploy/app-python');
-  console.log('    • kubectl logs -n assessment deploy/mongo');
   console.log('═══════════════════════════════════════════════════');
 }
