@@ -3,6 +3,7 @@ import time
 import json
 import signal
 import sys
+import random # Added for jitter
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -15,13 +16,8 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/assessmentdb")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
-# TUNED FOR 10K VUs: 
-# We want huge batches to minimize IOPS consumption.
-# 50,000 writes/sec / 1000 per batch = 50 IOPS. Perfect.
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "1000")) 
 FLUSH_INTERVAL = float(os.getenv("FLUSH_INTERVAL", "2.0")) 
-MAX_RETRIES = 5
-RETRY_DELAY = 2.0
 
 WRITE_STREAM = "writes"
 CONSUMER_GROUP = "mongo-writers"
@@ -38,9 +34,11 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 def connect_mongo():
+    # JITTER: Prevents "Thundering Herd" during rollout
+    time.sleep(random.uniform(1, 5))
     try:
-        # Use a small pool here; the API needs the connections more than the worker
-        client = MongoClient(MONGO_URI, maxPoolSize=5, serverSelectionTimeoutMS=5000)
+        # maxPoolSize=2 is plenty for a worker that only does batch inserts
+        client = MongoClient(MONGO_URI, maxPoolSize=2, serverSelectionTimeoutMS=10000)
         client.admin.command("ping")
         return client
     except Exception as e:
@@ -64,18 +62,17 @@ def process_batch(collection, messages: List[tuple]) -> int:
     for msg_id, fields in messages:
         try:
             data = json.loads(fields.get("data", "{}"))
-            # Clean up data before insert
             if "_id" in data: del data["_id"] 
             docs.append(data)
             message_ids.append(msg_id)
         except:
-            message_ids.append(msg_id) # Ack bad JSON so it doesn't block
+            message_ids.append(msg_id)
     
     if not docs:
         return len(message_ids)
     
     try:
-        # 1 IOPS ticket used here regardless of batch size
+        # Use bulk_write or insert_many. insert_many is fine here.
         collection.insert_many(docs, ordered=False)
         return len(docs)
     except BulkWriteError as e:
@@ -85,11 +82,18 @@ def process_batch(collection, messages: List[tuple]) -> int:
         return 0
 
 def main():
-    mongo_client = connect_mongo()
-    r = connect_redis()
-    
-    if not mongo_client or not r:
-        sys.exit(1)
+    # Retry loop to ensure it doesn't just die if Mongo is slow
+    mongo_client = None
+    while running and not mongo_client:
+        mongo_client = connect_mongo()
+        if not mongo_client: time.sleep(5)
+
+    r = None
+    while running and not r:
+        r = connect_redis()
+        if not r: time.sleep(5)
+
+    if not running: return
 
     # Ensure group exists
     try:
@@ -107,8 +111,7 @@ def main():
 
     while running:
         try:
-            # Pull a large chunk from the stream
-            # Block for 2 seconds to allow the stream to fill up (batching at the source)
+            # We use a 2s block to aggregate data in memory rather than hitting Mongo
             response = r.xreadgroup(
                 CONSUMER_GROUP, CONSUMER_NAME, 
                 {WRITE_STREAM: ">"}, count=BATCH_SIZE, block=2000
@@ -120,12 +123,12 @@ def main():
                         pending_messages.append((msg_id, fields))
 
             now = time.time()
+            # Flush logic: either batch is full or time is up
             if pending_messages and (len(pending_messages) >= BATCH_SIZE or (now - last_flush) >= FLUSH_INTERVAL):
-                # WRITE TO MONGO
                 processed_count = process_batch(col, pending_messages)
                 
-                # ACKNOWLEDGE IN REDIS
                 m_ids = [m[0] for m in pending_messages]
+                # Pipeline the ACKs in the future if Redis becomes the bottleneck
                 r.xack(WRITE_STREAM, CONSUMER_GROUP, *m_ids)
                 
                 print(f"[worker] Flushed {len(pending_messages)} messages to Mongo.")
@@ -133,13 +136,12 @@ def main():
                 pending_messages = []
                 last_flush = now
                 
-                # IOPS PROTECTION:
-                # Small sleep to ensure we don't exceed 100 IOPS if multiple workers are running
-                time.sleep(0.05) 
+                # Mandatory backoff to stay under IOPS limit
+                time.sleep(0.1) 
 
         except Exception as e:
             print(f"[worker] Loop error: {e}")
-            time.sleep(1)
+            time.sleep(2)
 
     print("Worker stopped.")
 
