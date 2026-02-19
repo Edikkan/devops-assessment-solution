@@ -1,10 +1,6 @@
----
-# ══════════════════════════════════════════════════════════════════════════════
 # Worker Consumer Deployment
-#
-# Purpose: Reads write operations from Redis Stream and batches them to MongoDB.
-# This allows the API to handle 10K concurrent users against a 100 IOPS MongoDB.
-# ══════════════════════════════════════════════════════════════════════════════
+# Purpose: Reads write operations from Redis Stream and batches them to MongoDB
+# ════════════════════════════════════════════════════════════════════════════
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,7 +10,7 @@ metadata:
     app: worker
     assessment: "true"
 spec:
-  replicas: 2  # Multiple workers for redundancy and throughput
+  replicas: 2
   selector:
     matchLabels:
       app: worker
@@ -24,6 +20,31 @@ spec:
         app: worker
         assessment: "true"
     spec:
+      # CRITICAL FIX: Add init containers to wait for dependencies
+      initContainers:
+        - name: wait-for-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redis at redis:6379..."
+              until nc -z redis 6379; do
+                sleep 2
+              done
+              echo "Redis is ready!"
+        - name: wait-for-mongo
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MongoDB at mongo:27017..."
+              until nc -z mongo 27017; do
+                sleep 2
+              done
+              echo "MongoDB is ready!"
+      
       containers:
         - name: worker
           image: assessment/worker:latest
@@ -36,13 +57,14 @@ spec:
             - name: REDIS_PORT
               value: "6379"
             - name: BATCH_SIZE
-              value: "100"  # Writes per batch
+              value: "100"
             - name: FLUSH_INTERVAL
-              value: "1.0"  # Seconds between flushes
+              value: "1.0"
             - name: HOSTNAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          
           resources:
             requests:
               memory: "128Mi"
@@ -50,5 +72,32 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "500m"
-          # No readiness/liveness probes needed for worker
-          # It will retry connections automatically
+          
+          # CRITICAL FIX: Add readiness probe so Kubernetes knows when it's ready
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  # Check if we can reach Redis (our primary dependency)
+                  redis-cli -h redis -p 6379 ping | grep -q PONG
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          
+          # CRITICAL FIX: Add liveness probe to restart if stuck
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  # Simple check: can we execute a basic command
+                  redis-cli -h redis -p 6379 ping | grep -q PONG
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
