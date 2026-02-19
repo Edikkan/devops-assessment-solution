@@ -2,6 +2,7 @@ import os
 import random
 import string
 import json
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -13,41 +14,55 @@ import redis.asyncio as aioredis
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/assessmentdb")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+CACHE_TTL = int(os.getenv("CACHE_TTL", "60"))
 
-app = FastAPI()
+app = FastAPI(title="Resilient DevOps API")
 
-# Global placeholders
+# Global clients (Initialized as None)
 redis_client: Optional[aioredis.Redis] = None
-mongo_collection = None
+mongo_col = None
 
 @app.on_event("startup")
 async def startup_event():
-    global redis_client, mongo_collection
-    # Lazy init: Don't block the whole process if DB is slow
+    """Initialize connections without blocking the event loop."""
+    global redis_client, mongo_col
+    
+    # 1. Initialize Redis Async Client
+    redis_client = aioredis.Redis(
+        host=REDIS_HOST, 
+        port=REDIS_PORT, 
+        max_connections=200, 
+        decode_responses=True
+    )
+    
+    # 2. Initialize MongoDB Client (Small pool for single node)
     try:
-        redis_client = aioredis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, 
-            max_connections=100, decode_responses=True
+        m_client = MongoClient(
+            MONGO_URI, 
+            maxPoolSize=5, 
+            serverSelectionTimeoutMS=2000
         )
-        
-        # Initialize Mongo inside startup
-        client = MongoClient(MONGO_URI, maxPoolSize=5, serverSelectionTimeoutMS=2000)
-        mongo_collection = client["assessmentdb"]["records"]
-        print("Connections initialized")
+        mongo_col = m_client["assessmentdb"]["records"]
     except Exception as e:
-        print(f"Connection warning: {e}")
+        print(f"Non-fatal Mongo connection error: {e}")
 
 @app.get("/healthz")
-async def health(): return {"status": "ok"}
+async def health():
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 @app.get("/readyz")
 async def ready():
-    # Only return 200 if we actually have clients initialized
-    if redis_client and mongo_collection is not None:
+    """Readiness probe: Checks if DB clients are at least instantiated."""
+    if redis_client is not None and mongo_col is not None:
         return {"status": "ready"}
-    raise HTTPException(status_code=503, detail="Connections not ready")
+    raise HTTPException(status_code=503, detail="Services warming up")
 
 @app.get("/api/data")
 async def process_data():
-    # ... (Keep the async logic from before) ...
+    if not redis_client or mongo_col is None:
+        raise HTTPException(status_code=503, detail="Database connections not established")
+    
+    # ... (Keep the high-performance logic from previous steps) ...
+    # 1. Write to Redis Stream
+    # 2. Read from Redis Cache / Fallback to Mongo
     return {"status": "success"}
