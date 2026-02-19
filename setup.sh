@@ -54,11 +54,6 @@ docker build -t "assessment/app-python:latest" "${SCRIPT_DIR}/app-python/"
 k3d image import "assessment/app-python:latest" --cluster "${CLUSTER_NAME}"
 success "Python image imported."
 
-info "Building Node.js app image..."
-docker build -t "assessment/app-nodejs:latest" "${SCRIPT_DIR}/app-nodejs/"
-k3d image import "assessment/app-nodejs:latest" --cluster "${CLUSTER_NAME}"
-success "Node.js image imported."
-
 info "Building Worker image..."
 docker build -t "assessment/worker:latest" "${SCRIPT_DIR}/worker/"
 k3d image import "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
@@ -87,9 +82,6 @@ kubectl rollout status deployment/worker -n "${NAMESPACE}" --timeout=120s
 
 info "Waiting for Python app to be ready..."
 kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=180s
-
-info "Waiting for Node.js app to be ready..."
-kubectl rollout status deployment/app-nodejs -n "${NAMESPACE}" --timeout=180s
 
 success "All deployments are ready!"
 
