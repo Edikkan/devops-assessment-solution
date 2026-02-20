@@ -1,3 +1,4 @@
+# ── API Deployment ────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,8 +31,24 @@ spec:
             httpGet: { path: /readyz, port: 8000 }
             initialDelaySeconds: 10
             periodSeconds: 10
-            failureThreshold: 20
 ---
+# ── API Service (NodePort Bypass) ───────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-python-nodeport
+  namespace: assessment
+spec:
+  type: NodePort
+  selector:
+    app: app-python
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+      nodePort: 30080  # This maps VM:30080 directly to the Pods
+---
+# ── Worker Deployment ─────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,33 +69,3 @@ spec:
           imagePullPolicy: Never
           resources:
             requests: { cpu: "200m", memory: "256Mi" }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-python
-  namespace: assessment
-spec:
-  selector: { app: app-python }
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8000
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: assessment-ingress
-  namespace: assessment
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
-spec:
-  rules:
-    - host: assessment.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: app-python, port: { number: 80 } }
