@@ -1,3 +1,4 @@
+# ── API Deployment (Native Host Performance) ──────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +24,12 @@ spec:
             - name: REDIS_HOST
               value: "redis.assessment.svc.cluster.local"
           resources:
-            limits: { cpu: "4000m", memory: "1Gi" }
+            requests:
+              cpu: "500m"     # Guaranteed core to start
+              memory: "256Mi"
+            limits:
+              cpu: "7500m"    # Can burst to almost all 8 cores
+              memory: "2Gi"
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -31,6 +37,7 @@ spec:
             initialDelaySeconds: 2
             periodSeconds: 5
 ---
+# ── Worker Deployment (Background Processing) ────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,3 +58,7 @@ spec:
           env:
             - name: REDIS_HOST
               value: "redis.assessment.svc.cluster.local"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
