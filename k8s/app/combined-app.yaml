@@ -1,4 +1,3 @@
-# ── API Deployment ────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,17 +5,14 @@ metadata:
   namespace: assessment
   labels: { app: app-python }
 spec:
-  replicas: 15
+  replicas: 12  # Slightly reduced to ensure they all fit comfortably
   selector:
     matchLabels: { app: app-python }
   template:
     metadata:
       labels: { app: app-python }
     spec:
-      securityContext:
-        sysctls:
-          - name: net.core.somaxconn
-            value: "10000"
+      # Removed securityContext sysctls to avoid "Forbidden" or "Timeout" errors
       containers:
         - name: app-python
           image: assessment/app-python:latest
@@ -25,14 +21,14 @@ spec:
             - name: UVICORN_WORKERS
               value: "1"
           resources:
-            requests: { cpu: "400m", memory: "256Mi" }
-            limits: { cpu: "2000m", memory: "512Mi" }
+            requests: { cpu: "200m", memory: "128Mi" } # Lowered requests for faster scheduling
+            limits: { cpu: "1500m", memory: "512Mi" }
           readinessProbe:
             httpGet: { path: /readyz, port: 8000 }
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 10
+            failureThreshold: 3
 ---
-# ── API Service (NodePort Bypass) ───────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
@@ -46,9 +42,8 @@ spec:
     - protocol: TCP
       port: 8000
       targetPort: 8000
-      nodePort: 30080  # This maps VM:30080 directly to the Pods
+      nodePort: 30080
 ---
-# ── Worker Deployment ─────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -56,7 +51,7 @@ metadata:
   namespace: assessment
   labels: { app: worker }
 spec:
-  replicas: 4
+  replicas: 2 # Reduced worker count to save CPU for the API during the test
   selector:
     matchLabels: { app: worker }
   template:
@@ -68,4 +63,4 @@ spec:
           image: assessment/worker:latest
           imagePullPolicy: Never
           resources:
-            requests: { cpu: "200m", memory: "256Mi" }
+            requests: { cpu: "100m", memory: "128Mi" }
