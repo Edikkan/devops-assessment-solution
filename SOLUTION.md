@@ -2,12 +2,14 @@
 
 This solution addresses the challenge of scaling an under-optimized Python/MongoDB application to survive 10,000 concurrent users on a single-node cluster with strictly capped database IOPS (~100).
 
-By identifying that the primary bottleneck was not just the database, but the Kubernetes networking stack and synchronous I/O overhead, we implemented a high-performance "Native Path" architecture. This resulted in a 100% success rate with a throughput of >1,200 RPS and sub-100ms latency.
+By identifying that the primary bottleneck was not just the database, but the Kubernetes networking stack and synchronous I/O overhead, I implemented a high-performance "Native Path" architecture. This resulted in a 100% success rate with a throughput of >1,200 RPS and sub-100ms latency.
 
 3. Bottlenecks Identified
 
 A. The Networking "Middleman" Wall
-Initially, traffic flowed through Traefik Ingress -> Kube-Proxy (IPTables) -> Service -> Pod. At 10,000 concurrent users, the connection tracking table (conntrack) on the host and the user-space overhead of the Ingress controller caused thousands of EOF and Connection Reset errors before the traffic even reached the application.
+Initially, traffic flowed through Traefik Ingress -> Kube-Proxy (IPTables) -> Service -> Pod. 
+
+At 10,000 concurrent users, the connection tracking table (conntrack) on the host and the user-space overhead of the Ingress controller caused thousands of EOF and Connection Reset errors before the traffic even reached the application.
 
 B. Synchronous MongoDB Blocking
 The original code attempted 5 reads and 5 writes per request directly to a MongoDB instance capped at 100 IOPS.
@@ -28,7 +30,7 @@ Key Components:
  
  * HostNetwork "Native" Mode: The Python Pod was switched to hostNetwork: true. This allows the application to bind directly to the VM's network stack, bypassing the Ingress and Kube-proxy entirely.
  
- * Uvicorn Worker Scaling: We utilized the full power of the F8s_v2 (8 cores) by running 8 Uvicorn workers in a single high-performance Pod.
+ * Uvicorn Worker Scaling: I utilized the full power of an Azure F8s_v2 (8 cores) vm by running 8 Uvicorn workers in a single high-performance Pod.
 
 4. Implementation Details
 
@@ -102,4 +104,4 @@ ulimit -n 100000
 k6 run stress-test/stress-test.js
 
 8. Final Conclusion
-The system successfully met all criteria. By choosing stability and network locality over raw replica counts, we achieved a 0% error rate. The use of Redis as a buffer effectively "shielded" the IOPS-constrained MongoDB from the 10,000 user burst, proving that architectural decoupling is the ultimate solution to database constraints.
+The system successfully met all criteria. By choosing stability and network locality over raw replica counts, I achieved a 0% error rate. The use of Redis as a buffer effectively "shielded" the IOPS-constrained MongoDB from the 10,000 user burst, proving that architectural decoupling is the ultimate solution to database constraints.
