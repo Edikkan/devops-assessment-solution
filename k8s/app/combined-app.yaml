@@ -1,11 +1,20 @@
+# ── API Deployment ────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-python
   namespace: assessment
+  labels:
+    app: app-python
 spec:
   replicas: 15
+  selector:
+    matchLabels:
+      app: app-python
   template:
+    metadata:
+      labels:
+        app: app-python
     spec:
       containers:
         - name: app-python
@@ -13,29 +22,40 @@ spec:
           imagePullPolicy: Never
           env:
             - name: UVICORN_WORKERS
-              value: "2" # With 8 cores, we can handle 30 workers across 15 pods easily
+              value: "1"
           resources:
             requests:
               memory: "256Mi"
-              cpu: "400m" # Guaranteed 6 full cores for the app (15 * 0.4)
+              cpu: "400m"
             limits:
               memory: "512Mi"
-              cpu: "1500m" # Allow pods to burst if k6 isn't using the core
+              cpu: "2000m" # High burst for F8s_v2
           readinessProbe:
-            httpGet: { path: /readyz, port: 8000 }
+            httpGet:
+              path: /readyz
+              port: 8000
             initialDelaySeconds: 15
             periodSeconds: 10
-            failureThreshold: 10
-            timeoutSeconds: 3
+            failureThreshold: 15
+            timeoutSeconds: 5
 ---
+# ── Worker Deployment ─────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
   namespace: assessment
+  labels:
+    app: worker
 spec:
-  replicas: 4 # Increased workers to process the massive throughput of the F-series
+  replicas: 4
+  selector:
+    matchLabels:
+      app: worker
   template:
+    metadata:
+      labels:
+        app: worker
     spec:
       containers:
         - name: worker
@@ -45,3 +65,39 @@ spec:
             requests:
               cpu: "200m"
               memory: "256Mi"
+---
+# ── Service ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-python
+  namespace: assessment
+spec:
+  selector:
+    app: app-python
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+---
+# ── Ingress ──────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: assessment-ingress
+  namespace: assessment
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 120s
+spec:
+  rules:
+    - host: assessment.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-python
+                port:
+                  number: 80
