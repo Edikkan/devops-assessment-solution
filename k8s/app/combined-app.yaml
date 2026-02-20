@@ -12,23 +12,23 @@ spec:
       labels: { app: app-python }
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet # CRITICAL: Allows pod to find 'redis'
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
           env:
             - name: UVICORN_WORKERS
-              value: "4" # Leveraging F8s_v2 compute
+              value: "4" 
             - name: REDIS_HOST
-              value: "redis.assessment.svc.cluster.local" # Full DNS path
+              value: "redis.assessment.svc.cluster.local"
           resources:
             limits: { cpu: "4000m", memory: "1Gi" }
           ports:
             - containerPort: 8000
           readinessProbe:
             httpGet: { path: /healthz, port: 8000 }
-            initialDelaySeconds: 3
+            initialDelaySeconds: 2
             periodSeconds: 5
 ---
 apiVersion: apps/v1
