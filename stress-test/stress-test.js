@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 // TARGET THE POD IP (Get this from the deployment step below)
-const POD_IP = '172.18.0.4'; 
+const POD_IP = '172.18.0.3'; 
 const BASE_URL = `http://${POD_IP}:8000`;
 
 export const options = {
