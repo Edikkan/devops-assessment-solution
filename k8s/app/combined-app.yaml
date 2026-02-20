@@ -3,55 +3,36 @@ kind: Deployment
 metadata:
   name: app-python
   namespace: assessment
-  labels: { app: app-python }
 spec:
-  replicas: 12  # Slightly reduced to ensure they all fit comfortably
+  replicas: 1 # On hostNetwork, only 1 pod can bind to port 8000 per node
   selector:
     matchLabels: { app: app-python }
   template:
     metadata:
       labels: { app: app-python }
     spec:
-      # Removed securityContext sysctls to avoid "Forbidden" or "Timeout" errors
+      hostNetwork: true # Binds directly to VM port 8000
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
           env:
             - name: UVICORN_WORKERS
-              value: "1"
+              value: "4" # Use 4 workers to leverage the F8s_v2 cores
           resources:
-            requests: { cpu: "200m", memory: "128Mi" } # Lowered requests for faster scheduling
-            limits: { cpu: "1500m", memory: "512Mi" }
+            limits: { cpu: "4000m", memory: "1Gi" }
           readinessProbe:
-            httpGet: { path: /readyz, port: 8000 }
+            httpGet: { path: /healthz, port: 8000 }
             initialDelaySeconds: 5
-            periodSeconds: 10
-            failureThreshold: 3
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-python-nodeport
-  namespace: assessment
-spec:
-  type: NodePort
-  selector:
-    app: app-python
-  ports:
-    - protocol: TCP
-      port: 8000
-      targetPort: 8000
-      nodePort: 30080
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
   namespace: assessment
-  labels: { app: worker }
 spec:
-  replicas: 2 # Reduced worker count to save CPU for the API during the test
+  replicas: 4
   selector:
     matchLabels: { app: worker }
   template:
@@ -62,5 +43,3 @@ spec:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
-          resources:
-            requests: { cpu: "100m", memory: "128Mi" }
