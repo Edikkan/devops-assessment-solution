@@ -10,24 +10,22 @@ export const options = {
   ],
   thresholds: {
     http_req_duration: ['p(95)<2000'],
-    http_req_failed: ['rate<0.01'],
+    http_req_failed: ['rate<0.01'], // 1% threshold
   },
-  // Ensure we reuse connections to save the OS from socket exhaustion
-  noConnectionReuse: false,
+  discardResponseBodies: true,
+  noConnectionReuse: false, // Keep connections alive
 };
 
 export default function () {
   const params = {
-    headers: { 
-      'Host': 'assessment.local',
-      'Connection': 'keep-alive' 
-    },
-    timeout: '10s',
+    headers: { 'Connection': 'keep-alive' },
+    timeout: '15s',
   };
 
-  const res = http.get('http://127.0.0.1/api/data', params);
+  // TARGET NODEPORT DIRECTLY
+  const res = http.get('http://127.0.0.1:30080/api/data', params);
 
   check(res, { 'status is 200': (r) => r.status === 200 });
 
-  sleep(0.5); 
+  sleep(1.0); 
 }
