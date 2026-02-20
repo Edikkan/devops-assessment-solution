@@ -1,21 +1,21 @@
-# ── API Deployment ────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app-python
   namespace: assessment
-  labels:
-    app: app-python
+  labels: { app: app-python }
 spec:
   replicas: 15
   selector:
-    matchLabels:
-      app: app-python
+    matchLabels: { app: app-python }
   template:
     metadata:
-      labels:
-        app: app-python
+      labels: { app: app-python }
     spec:
+      securityContext:
+        sysctls:
+          - name: net.core.somaxconn
+            value: "10000"
       containers:
         - name: app-python
           image: assessment/app-python:latest
@@ -24,63 +24,47 @@ spec:
             - name: UVICORN_WORKERS
               value: "1"
           resources:
-            requests:
-              memory: "256Mi"
-              cpu: "400m"
-            limits:
-              memory: "512Mi"
-              cpu: "2000m" # High burst for F8s_v2
+            requests: { cpu: "400m", memory: "256Mi" }
+            limits: { cpu: "2000m", memory: "512Mi" }
           readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8000
-            initialDelaySeconds: 15
+            httpGet: { path: /readyz, port: 8000 }
+            initialDelaySeconds: 10
             periodSeconds: 10
-            failureThreshold: 15
-            timeoutSeconds: 5
+            failureThreshold: 20
 ---
-# ── Worker Deployment ─────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker
   namespace: assessment
-  labels:
-    app: worker
+  labels: { app: worker }
 spec:
   replicas: 4
   selector:
-    matchLabels:
-      app: worker
+    matchLabels: { app: worker }
   template:
     metadata:
-      labels:
-        app: worker
+      labels: { app: worker }
     spec:
       containers:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
           resources:
-            requests:
-              cpu: "200m"
-              memory: "256Mi"
+            requests: { cpu: "200m", memory: "256Mi" }
 ---
-# ── Service ──────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Service
 metadata:
   name: app-python
   namespace: assessment
 spec:
-  selector:
-    app: app-python
+  selector: { app: app-python }
   ports:
     - protocol: TCP
       port: 80
       targetPort: 8000
 ---
-# ── Ingress ──────────────────────────────────────────────────────────────────
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -88,7 +72,7 @@ metadata:
   namespace: assessment
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 120s
+    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 60s
 spec:
   rules:
     - host: assessment.local
@@ -97,7 +81,4 @@ spec:
           - path: /
             pathType: Prefix
             backend:
-              service:
-                name: app-python
-                port:
-                  number: 80
+              service: { name: app-python, port: { number: 80 } }
