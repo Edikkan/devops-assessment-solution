@@ -10,20 +10,18 @@ export const options = {
   ],
   thresholds: {
     http_req_duration: ['p(95)<2000'],
-    http_req_failed: ['rate<0.01'],
+    http_req_failed: ['rate<0.01'], 
   },
   discardResponseBodies: true,
-  noConnectionReuse: false,
 };
 
 export default function () {
-  const params = {
+  // Directly hit the host port
+  const res = http.get('http://127.0.0.1:8000/api/data', {
     headers: { 'Connection': 'keep-alive' },
-    timeout: '10s',
-  };
+    timeout: '10s'
+  });
 
-  const res = http.get('http://127.0.0.1:8000/api/data', params);
   check(res, { 'status is 200': (r) => r.status === 200 });
-
   sleep(1.0); 
 }
