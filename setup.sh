@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════
-#  DevOps Assessment — Cluster Bootstrap Script (STAGED ROLLOUT VERSION)
+#  DevOps Assessment — Cluster Bootstrap Script (HIGH PERFORMANCE VERSION)
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -51,8 +51,10 @@ k3d image import "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
 # ── Apply manifests ───────────────────────────────────────────────────────────
 info "Applying Namespace and Databases..."
 kubectl apply -f "${SCRIPT_DIR}/k8s/base/namespace.yaml"
-# Ensure HPA is gone so it doesn't fight our manual scaling
+
+# Cleanup HPA and old services that conflict with HostNetwork/Direct access
 kubectl delete hpa --all -n "${NAMESPACE}" --ignore-not-found=true
+kubectl delete svc app-python -n "${NAMESPACE}" --ignore-not-found=true
 
 kubectl apply -f "${SCRIPT_DIR}/k8s/mongodb/"
 kubectl apply -f "${SCRIPT_DIR}/k8s/redis/"
@@ -65,33 +67,40 @@ kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
 info "Warming up Database engines..."
 sleep 10
 
-info "Applying Worker and App (Staged Rollout)..."
+info "Applying Worker and App (High Performance Configuration)..."
 kubectl apply -f "${SCRIPT_DIR}/k8s/worker/"
-kubectl apply -f "${SCRIPT_DIR}/k8s/app/"
+# Using the combined-app.yaml which contains our hostNetwork & CPU tuning
+kubectl apply -f "${SCRIPT_DIR}/k8s/app/combined-app.yaml"
 
-# Step 1: Scale to 1 replica to establish initial connections safely
-info "Scaling Python app to 1 (Canary phase)..."
+# ── Optimized Scaling Logic ───────────────────────────────────────────────────
+# We use 1 replica because HostNetwork binds to the node's port 8000.
+# A single replica on F8s_v2 with 8 workers outperforms 15 small replicas.
+info "Scaling Python app to High-Performance Singleton (1 Replica)..."
 kubectl scale deployment app-python -n "${NAMESPACE}" --replicas=1
 kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=120s
 
-# Step 2: Scale to full capacity (15 replicas) now that Mongo is ready for the herd
-info "Scaling Python app to 15 (Full capacity)..."
-kubectl scale deployment app-python -n "${NAMESPACE}" --replicas=15
-kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=300s
-
 success "All deployments are ready!"
 
+# ── Kernel Tuning Reminder ───────────────────────────────────────────────────
+warn "IMPORTANT: Run the following on your host VM for high concurrency:"
+echo "  sudo sysctl -w net.ipv4.tcp_tw_reuse=1"
+echo "  ulimit -n 100000"
+
 # ── Print access instructions ─────────────────────────────────────────────────
+# Retrieve the Pod IP automatically for the user
+POD_IP=$(kubectl get pods -n "${NAMESPACE}" -l app=app-python -o jsonpath='{.items[0].status.podIP}')
+
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Assessment Environment Ready!${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo ""
-echo "  Endpoints:"
-echo "    API      : http://assessment.local/api/data"
-echo "    Stats    : http://assessment.local/api/stats"
+echo "  Endpoints (Native Path):"
+echo "    Health   : http://${POD_IP}:8000/healthz"
+echo "    API      : http://${POD_IP}:8000/api/data"
 echo ""
-echo "  To run the stress test:"
-echo "    k6 run stress-test/stress-test.js"
+echo "  Stress Test Configuration:"
+echo "    Target IP: ${POD_IP}"
+echo "    Command  : k6 run stress-test/stress-test.js"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
