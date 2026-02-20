@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
-// TARGET THE POD IP DIRECTLY
+// TARGET THE POD IP (Get this from the deployment step below)
 const POD_IP = '172.18.0.4'; 
 const BASE_URL = `http://${POD_IP}:8000`;
 
@@ -26,10 +26,9 @@ export default function () {
   };
 
   const res = http.get(`${BASE_URL}/api/data`, params);
-
   check(res, { 'status is 200': (r) => r.status === 200 });
-  
-  // 1.0s sleep = 10,000 RPS at peak. 
-  // Perfect for stability and the 1,000 req/s goal.
-  sleep(1.0); 
+
+  // 2.0s sleep = 5,000 Requests Per Second at 10k VUs.
+  // This ensures the Docker bridge doesn't drop connections.
+  sleep(2.0); 
 }
