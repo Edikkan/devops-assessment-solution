@@ -4,27 +4,32 @@ metadata:
   name: app-python
   namespace: assessment
 spec:
-  replicas: 1 # On hostNetwork, only 1 pod can bind to port 8000 per node
+  replicas: 1 
   selector:
     matchLabels: { app: app-python }
   template:
     metadata:
       labels: { app: app-python }
     spec:
-      hostNetwork: true # Binds directly to VM port 8000
-      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet # CRITICAL: Allows pod to find 'redis' while on host network
       containers:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
           env:
             - name: UVICORN_WORKERS
-              value: "4" # Use 4 workers to leverage the F8s_v2 cores
+              value: "4" # Leveraging F8s_v2 8-core compute
+            - name: REDIS_HOST
+              value: "redis.assessment.svc.cluster.local" # Full DNS path for safety
           resources:
             limits: { cpu: "4000m", memory: "1Gi" }
+          ports:
+            - containerPort: 8000
           readinessProbe:
             httpGet: { path: /healthz, port: 8000 }
-            initialDelaySeconds: 5
+            initialDelaySeconds: 3
+            periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -43,3 +48,6 @@ spec:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
+          env:
+            - name: REDIS_HOST
+              value: "redis.assessment.svc.cluster.local"
