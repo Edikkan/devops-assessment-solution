@@ -1,4 +1,5 @@
 1. Executive Summary
+
 This solution addresses the challenge of scaling an under-optimized Python/MongoDB application to survive 10,000 concurrent users on a single-node cluster with strictly capped database IOPS (~100).
 
 By identifying that the primary bottleneck was not just the database, but the Kubernetes networking stack and synchronous I/O overhead, we implemented a high-performance "Native Path" architecture. This resulted in a 100% success rate with a throughput of >1,200 RPS and sub-100ms latency.
