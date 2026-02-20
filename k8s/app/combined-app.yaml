@@ -4,36 +4,37 @@ metadata:
   name: app-python
   namespace: assessment
 spec:
-  replicas: 15
-  strategy:
-    rollingUpdate:
-      maxSurge: 5
-      maxUnavailable: 0
+  replicas: 1 
   selector:
-    matchLabels:
-      app: app-python
+    matchLabels: { app: app-python }
   template:
     metadata:
-      labels:
-        app: app-python
+      labels: { app: app-python }
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: app-python
           image: assessment/app-python:latest
           imagePullPolicy: Never
+          env:
+            - name: UVICORN_WORKERS
+              value: "8" # Optimized for 8-core F8s_v2
+            - name: REDIS_HOST
+              value: "redis.assessment.svc.cluster.local"
           resources:
             requests:
+              cpu: "500m"
               memory: "256Mi"
-              cpu: "500m" # Increased request for better scheduling
             limits:
-              memory: "512Mi"
-              cpu: "1000m" # Allow full core burst
+              cpu: "7500m"
+              memory: "2Gi"
+          ports:
+            - containerPort: 8000
           readinessProbe:
-            httpGet: { path: /readyz, port: 8000 }
-            initialDelaySeconds: 15
-            periodSeconds: 15
-            failureThreshold: 30 # Extremely high to prevent flapping
-            timeoutSeconds: 10
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -41,52 +42,17 @@ metadata:
   name: worker
   namespace: assessment
 spec:
-  replicas: 3 # 3 is enough if they are fast
+  replicas: 4
   selector:
-    matchLabels:
-      app: worker
+    matchLabels: { app: worker }
   template:
     metadata:
-      labels:
-        app: worker
+      labels: { app: worker }
     spec:
       containers:
         - name: worker
           image: assessment/worker:latest
           imagePullPolicy: Never
           env:
-            - name: BATCH_SIZE
-              value: "2000" # Larger batches to reduce Mongo IOPS
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-python
-  namespace: assessment
-spec:
-  selector:
-    app: app-python
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8000
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: assessment-ingress
-  namespace: assessment
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
-    # Buffer tuning for 10k VUs
-    traefik.ingress.kubernetes.io/router.middlewares: assessment-ratelimit@kubernetescrd
-    traefik.ingress.kubernetes.io/transport.respondingTimeouts.readTimeout: 120s
-spec:
-  rules:
-    - host: assessment.local
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: app-python, port: { number: 80 } }
+            - name: REDIS_HOST
+              value: "redis.assessment.svc.cluster.local"
