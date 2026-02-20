@@ -16,11 +16,13 @@ export const options = {
 };
 
 export default function () {
-  // Directly hit the host port
-  const res = http.get('http://127.0.0.1:8000/api/data', {
+  const params = {
     headers: { 'Connection': 'keep-alive' },
     timeout: '10s'
-  });
+  };
+
+  // Direct hit on host port 8000
+  const res = http.get('http://127.0.0.1:8000/api/data', params);
 
   check(res, { 'status is 200': (r) => r.status === 200 });
   sleep(1.0); 
