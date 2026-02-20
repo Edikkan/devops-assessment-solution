@@ -4,7 +4,7 @@ This solution addresses the challenge of scaling an under-optimized Python/Mongo
 
 By identifying that the primary bottleneck was not just the database, but the Kubernetes networking stack and synchronous I/O overhead, I implemented a high-performance "Native Path" architecture. This resulted in a 100% success rate with a throughput of >1,200 RPS and sub-100ms latency.
 
-3. Bottlenecks Identified
+2. Bottlenecks Identified
 
 A. The Networking "Middleman" Wall
 Initially, traffic flowed through Traefik Ingress -> Kube-Proxy (IPTables) -> Service -> Pod. 
