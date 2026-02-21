@@ -5,7 +5,6 @@ metadata:
   namespace: assessment
 spec:
   replicas: 1
-  # This selector must match the template labels below EXACTLY
   selector:
     matchLabels:
       app: app-python
@@ -20,8 +19,8 @@ spec:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        # The --backlog 4096 is the secret sauce for the 10k users
-        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "12", "--backlog", "4096"]
+        # 1 worker per core is optimal for this scale
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--backlog", "8192"]
         env:
         - name: REDIS_URL
           value: "redis://localhost:6379"
@@ -29,7 +28,7 @@ spec:
           value: "mongodb://mongo.assessment.svc.cluster.local:27017"
         resources:
           requests:
-            cpu: "1000m"
+            cpu: "2000m"
             memory: "512Mi"
           limits:
             cpu: "7500m"
@@ -38,5 +37,4 @@ spec:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 5
-          periodSeconds: 5
+          initialDelaySeconds: 10
