@@ -18,9 +18,17 @@ mongo_client = None
 @app.on_event("startup")
 async def startup():
     global redis, mongo_client
-    # Initialize connection pools
-    redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
-    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
+    # Connection pooling is the secret to 10k concurrency
+    redis = await aioredis.from_url(
+        REDIS_URL, 
+        decode_responses=True,
+        max_connections=2000  # Large pool to handle the socket surge
+    )
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(
+        MONGO_URL,
+        maxPoolSize=100,      # Constrain Mongo to stay under IOPS limit
+        minPoolSize=20
+    )
 
 @app.get("/healthz")
 async def healthz():
@@ -28,11 +36,10 @@ async def healthz():
 
 @app.get("/api/data")
 async def get_data():
-    # 1. Simulate 5 Read Operations from Cache
+    # Caching and Streaming to decouple from Mongo
     for _ in range(5):
         await redis.get("global_stats")
 
-    # 2. Simulate 5 Write Operations via Stream
     payload = {"timestamp": time.time(), "action": "work"}
     for _ in range(5):
         await redis.xadd(STREAM_NAME, {"data": json.dumps(payload)})
