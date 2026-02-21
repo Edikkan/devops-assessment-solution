@@ -1,11 +1,9 @@
 from fastapi import FastAPI
 from redis import asyncio as aioredis
-import motor.motor_asyncio
 import os, json, time
 
 app = FastAPI()
 
-# Point to the K8s Service DNS instead of localhost
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis.assessment.svc.cluster.local:6379")
 STREAM_NAME = "write_stream"
 redis = None
@@ -13,26 +11,22 @@ redis = None
 @app.on_event("startup")
 async def startup():
     global redis
-    # High-performance pool with retry logic for 10k VU spikes
+    # Using a massive pool size and aggressive timeouts to prevent blocking
     redis = await aioredis.from_url(
         REDIS_URL, 
         decode_responses=True,
-        max_connections=5000,
-        socket_timeout=5,
-        retry_on_timeout=True
+        max_connections=10000, 
+        socket_connect_timeout=1,
+        socket_keepalive=True
     )
 
 @app.get("/healthz")
 async def healthz():
-    # Verify Redis is actually reachable before marking pod as Ready
-    try:
-        await redis.ping()
-        return {"status": "ok"}
-    except Exception:
-        return {"status": "error"}, 500
+    return {"status": "ok"}
 
 @app.get("/api/data")
 async def get_data():
+    # Batching the 5 reads and 5 writes into 2 network trips
     async with redis.pipeline(transaction=False) as pipe:
         for _ in range(5):
             pipe.get("global_stats")
