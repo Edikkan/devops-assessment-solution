@@ -4,55 +4,37 @@ metadata:
   name: app-python
   namespace: assessment
 spec:
-  replicas: 1 
+  replicas: 1
   selector:
-    matchLabels: { app: app-python }
+    matchLabels:
+      app: app-python
   template:
     metadata:
-      labels: { app: app-python }
+      labels:
+        app: app-python
     spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
-        - name: app-python
-          image: assessment/app-python:latest
-          imagePullPolicy: Never
-          env:
-            - name: UVICORN_WORKERS
-              value: "8" # Optimized for 8-core F8s_v2
-            - name: REDIS_HOST
-              value: "redis.assessment.svc.cluster.local"
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "256Mi"
-            limits:
-              cpu: "7500m"
-              memory: "2Gi"
-          ports:
-            - containerPort: 8000
-          readinessProbe:
-            httpGet: { path: /healthz, port: 8000 }
-            initialDelaySeconds: 2
-            periodSeconds: 5
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: worker
-  namespace: assessment
-spec:
-  replicas: 4
-  selector:
-    matchLabels: { app: worker }
-  template:
-    metadata:
-      labels: { app: worker }
-    spec:
-      containers:
-        - name: worker
-          image: assessment/worker:latest
-          imagePullPolicy: Never
-          env:
-            - name: REDIS_HOST
-              value: "redis.assessment.svc.cluster.local"
+      - name: app-python
+        image: assessment/app-python:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_URL
+          value: "redis://localhost:6379"
+        - name: MONGO_URL
+          value: "mongodb://mongo.assessment.svc.cluster.local:27017"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "7500m"
+            memory: "2Gi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 3
+          periodSeconds: 5
