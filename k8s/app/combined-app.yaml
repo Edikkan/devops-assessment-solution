@@ -5,9 +5,6 @@ metadata:
   namespace: assessment
 spec:
   replicas: 1
-  selector:
-    matchLabels:
-      app: app-python
   template:
     metadata:
       labels:
@@ -18,9 +15,9 @@ spec:
       containers:
       - name: app-python
         image: assessment/app-python:latest
-        imagePullPolicy: IfNotPresent # Tells K8s to use the imported image
-        ports:
-        - containerPort: 8000
+        imagePullPolicy: IfNotPresent
+        # We increase workers to 12 to handle the high context-switching of 10k users
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "12", "--backlog", "4096"]
         env:
         - name: REDIS_URL
           value: "redis://localhost:6379"
@@ -28,8 +25,8 @@ spec:
           value: "mongodb://mongo.assessment.svc.cluster.local:27017"
         resources:
           requests:
-            cpu: "500m"
-            memory: "256Mi"
+            cpu: "1000m"
+            memory: "512Mi"
           limits:
             cpu: "7500m"
             memory: "2Gi"
@@ -38,4 +35,3 @@ spec:
             path: /healthz
             port: 8000
           initialDelaySeconds: 5
-          periodSeconds: 5
