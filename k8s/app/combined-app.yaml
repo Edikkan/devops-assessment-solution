@@ -14,23 +14,21 @@ spec:
         app: app-python
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet # Required for DNS resolution while on hostNetwork
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--http", "httptools", "--backlog", "8192"]
-        env:
-        - name: REDIS_URL
-          value: "redis://redis.assessment.svc.cluster.local:6379"
+        # Increased backlog to 32k to hold the 10k VUs in queue
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--http", "httptools", "--backlog", "32768"]
         resources:
           requests:
             cpu: "2000m"
           limits:
-            cpu: "7500m"
+            cpu: "7800m" # Leave a tiny bit for the OS
             memory: "2Gi"
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
