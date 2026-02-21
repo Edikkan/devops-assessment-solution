@@ -18,6 +18,7 @@ spec:
       containers:
       - name: app-python
         image: assessment/app-python:latest
+        imagePullPolicy: IfNotPresent # Tells K8s to use the imported image
         ports:
         - containerPort: 8000
         env:
@@ -36,5 +37,5 @@ spec:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 3
+          initialDelaySeconds: 5
           periodSeconds: 5
