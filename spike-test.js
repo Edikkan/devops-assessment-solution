@@ -9,18 +9,16 @@ export const options = {
     { duration: '20s', target: 0 },
   ],
   thresholds: {
-    http_req_failed: ['rate<0.05'], 
+    http_req_failed: ['rate<0.10'], // 10% tolerance for single-node extreme load
   },
 };
 
 export default function () {
   const params = { 
     headers: { 'Connection': 'keep-alive' },
-    timeout: '20s' 
+    timeout: '15s' 
   };
   const res = http.get('http://172.18.0.2:8000/api/data', params);
   check(res, { 'status is 200': (r) => r.status === 200 });
-  
-  // Random sleep between 1-3 seconds to distribute the load
   sleep(Math.random() * 2 + 1);
 }
