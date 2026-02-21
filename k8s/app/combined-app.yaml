@@ -14,19 +14,23 @@ spec:
         app: app-python
     spec:
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      dnsPolicy: ClusterFirstWithHostNet # Required for DNS resolution while on hostNetwork
       containers:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        # --loop uvloop and --http httptools are the high-concurrency 'Secret Sauce'
         command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--http", "httptools", "--backlog", "8192"]
         env:
         - name: REDIS_URL
-          value: "redis://localhost:6379"
+          value: "redis://redis.assessment.svc.cluster.local:6379"
         resources:
           requests:
             cpu: "2000m"
           limits:
             cpu: "7500m"
             memory: "2Gi"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 10
