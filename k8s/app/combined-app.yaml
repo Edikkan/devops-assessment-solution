@@ -5,6 +5,10 @@ metadata:
   namespace: assessment
 spec:
   replicas: 1
+  # This selector must match the template labels below EXACTLY
+  selector:
+    matchLabels:
+      app: app-python
   template:
     metadata:
       labels:
@@ -16,7 +20,7 @@ spec:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        # We increase workers to 12 to handle the high context-switching of 10k users
+        # The --backlog 4096 is the secret sauce for the 10k users
         command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "12", "--backlog", "4096"]
         env:
         - name: REDIS_URL
@@ -35,3 +39,4 @@ spec:
             path: /healthz
             port: 8000
           initialDelaySeconds: 5
+          periodSeconds: 5
