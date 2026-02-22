@@ -1,7 +1,9 @@
 1. Executive Summary
+
 I have successfully optimized the application to handle 10,000 concurrent users while operating under a strict 100 IOPS limit on a single MongoDB node. By moving from a synchronous, database-heavy architecture to an asynchronous, event-driven model, I reduced the p(95) latency to 2.85ms with a 0% failure rate. Furthermore, I transitioned the infrastructure from a single-pod setup to a distributed 3-agent multi-node cluster to improve total throughput and system resilience.
 
 2. Bottleneck Analysis & Diagnosis
+
 When I performed the baseline stress test, the system failed almost immediately at scale. I identified the following primary bottlenecks:
 
  * Synchronous I/O Blockage: Each request required 5 reads and 5 writes. At 10,000 users, I was asking the system to perform 100,000 I/O operations simultaneously on a disk that only allows 100 operations per second. This created a massive backlog, leading to request timeouts and pod crashes.
