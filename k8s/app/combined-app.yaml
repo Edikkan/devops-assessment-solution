@@ -19,16 +19,19 @@ spec:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        # Increased backlog to 32k to hold the 10k VUs in queue
+        # High backlog prevents 'Connection Refused' during the 10k surge
         command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--http", "httptools", "--backlog", "32768"]
+        env:
+        - name: REDIS_URL
+          value: "redis://redis.assessment.svc.cluster.local:6379"
         resources:
           requests:
             cpu: "2000m"
           limits:
-            cpu: "7800m" # Leave a tiny bit for the OS
+            cpu: "7500m"
             memory: "2Gi"
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8000
-          initialDelaySeconds: 5
+          initialDelaySeconds: 10
