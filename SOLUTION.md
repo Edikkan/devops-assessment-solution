@@ -37,9 +37,11 @@ I chose to implement a Write-Behind (Asynchronous) pattern using Redis Streams.
 4. Technical Implementation Details
 
 4.1 Application Optimizations (Python)
+
 I chose the Python implementation and utilized uvloop with httptools. These C-based libraries allow the FastAPI/Uvicorn server to handle thousands of concurrent open sockets with minimal CPU overhead.
 
 4.2 Infrastructure: Horizontal Scaling (Multi-Node)
+
 Initially, I used a vertical scaling approach (one "fat" pod), but I ultimately moved to a Horizontal Scaling model to distribute the load more effectively:
 
  * Multi-Node Cluster: I configured k3d to spin up 3 Agent Nodes.
@@ -49,6 +51,7 @@ Initially, I used a vertical scaling approach (one "fat" pod), but I ultimately 
  * NodePort Service: I replaced hostNetwork with a NodePort Service (Port 30000). This allowed the 10,000 users to be load-balanced across three separate container runtimes, significantly increasing total throughput compared to the single-pod setup.
 
 5. Final Test Results
+
 The following results were achieved during the final 5-minute spike test using the 3-node cluster:
 
 | Metric | Pass Criteria | My Result | Status |
@@ -71,6 +74,7 @@ k6 Summary Output
     http_reqs..........................: 160895 565.776619/s
 
 6. Trade-offs and Considerations
+
 The primary trade-off I made was Eventual Consistency. Because I acknowledge the request as soon as it hits Redis, there is a sub-second delay before that data is persistent in MongoDB.
 
 In a high-scale data ingestion service as described in this assessment, this is the standard professional trade-off to maintain system availability under extreme load.
@@ -78,6 +82,7 @@ In a high-scale data ingestion service as described in this assessment, this is 
 I also prioritized Manual Scaling over HPA (Horizontal Pod Autoscaling) for this specific test. By pre-scaling to 3 replicas, I avoided the "cold start" and scaling-lag issues that often cause initial request failures during an instantaneous 10k user spike.
 
 7. How to Run
+
  * Ensure k8s/app/combined-app.yaml is set to replicas: 3 and service type NodePort.
 
  * Run ./setup.sh to prepare the multi-node cluster and kernel.
