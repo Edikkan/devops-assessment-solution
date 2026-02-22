@@ -4,7 +4,7 @@ metadata:
   name: app-python
   namespace: assessment
 spec:
-  replicas: 1
+  replicas: 3 # Scaled for multi-node distribution
   selector:
     matchLabels:
       app: app-python
@@ -13,25 +13,29 @@ spec:
       labels:
         app: app-python
     spec:
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: app-python
         image: assessment/app-python:latest
         imagePullPolicy: IfNotPresent
-        # High backlog prevents 'Connection Refused' during the 10k surge
-        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--http", "httptools", "--backlog", "32768"]
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--loop", "uvloop", "--http", "httptools", "--backlog", "10000"]
         env:
         - name: REDIS_URL
           value: "redis://redis.assessment.svc.cluster.local:6379"
         resources:
-          requests:
-            cpu: "2000m"
           limits:
-            cpu: "7500m"
-            memory: "2Gi"
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          initialDelaySeconds: 10
+            cpu: "2000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-python-service
+  namespace: assessment
+spec:
+  type: NodePort
+  selector:
+    app: app-python
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30000 # Direct access port on the VM

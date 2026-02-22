@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════
-#  DevOps Assessment — 10,000 VU CAPABLE AUTOMATED DEPLOY
+#  DevOps Assessment — MULTI-NODE 10,000 VU CAPABLE AUTOMATED DEPLOY
 # ════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -14,28 +14,33 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 die()     { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
-# ── 0. Host Kernel Hardening (Crucial for 10k VUs) ───────────────────────────
+# ── 0. Host Kernel Hardening ────────────────────────────────────────────────
 info "Hardening Host Kernel for high concurrency..."
-# Opening the "Waiting Room" for TCP connections
 sudo sysctl -w net.core.somaxconn=32768 >/dev/null
 sudo sysctl -w net.ipv4.tcp_max_syn_backlog=32768 >/dev/null
-
-# Faster socket recycling and port range expansion to prevent EOF errors
 sudo sysctl -w net.ipv4.tcp_tw_reuse=1 >/dev/null
 sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535" >/dev/null
 sudo sysctl -w net.ipv4.tcp_fin_timeout=15 >/dev/null
+ulimit -n 100000 || warn "Could not set ulimit manually."
 
-# Increasing file descriptors for 10k simultaneous sockets
-ulimit -n 100000 || warn "Could not set ulimit automatically. Ensure /etc/security/limits.conf is updated."
-
-# ── 1. Cluster & Image Setup ─────────────────────────────────────────────────
-if ! k3d cluster list | grep -q "^${CLUSTER_NAME}"; then
-  info "Creating cluster..."
-  k3d cluster create "${CLUSTER_NAME}" --port "80:80@loadbalancer" --agents 2
+# ── 1. Cluster Setup (Multi-Node Transition) ────────────────────────────────
+# We recreate the cluster to ensure the new 3-agent geometry is applied
+if k3d cluster list | grep -q "^${CLUSTER_NAME}"; then
+  info "Recreating cluster for Multi-Node geometry..."
+  k3d cluster delete "${CLUSTER_NAME}"
 fi
+
+# Create cluster with 1 Server and 3 Agents
+# Map VM port 8000 to NodePort 30000 on the agents
+info "Creating 3-Agent Cluster..."
+k3d cluster create "${CLUSTER_NAME}" \
+  --agents 3 \
+  --port "8000:30000@agent:0" \
+  --port "80:80@loadbalancer"
+
 kubectl config use-context "k3d-${CLUSTER_NAME}"
 
-info "Building and Importing Images (App + Worker)..."
+info "Building and Importing Images..."
 docker build -t "assessment/app-python:latest" ./app-python/
 docker build -t "assessment/worker:latest" ./worker/
 k3d image import "assessment/app-python:latest" "assessment/worker:latest" --cluster "${CLUSTER_NAME}"
@@ -50,30 +55,28 @@ kubectl rollout status deployment/redis -n "${NAMESPACE}" --timeout=120s
 
 info "Applying App + Worker Configuration..."
 kubectl apply -f k8s/worker/
+# Note: Ensure your combined-app.yaml has replicas: 3 for this run
 kubectl apply -f k8s/app/combined-app.yaml
 kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=120s
 
 # ── 3. Automated Bridge ──────────────────────────────────────────────────────
-info "Stabilizing Network (10s pause for connection pools)..."
+info "Stabilizing Network (10s pause)..."
 sleep 10
 
-# In hostNetwork mode, the Pod IP is the VM IP. We target the specific 8000 port.
-POD_IP=$(kubectl get pods -n "${NAMESPACE}" -l app=app-python -o jsonpath='{.items[0].status.hostIP}')
-[ -z "$POD_IP" ] && die "Could not retrieve Host/Pod IP."
+# Direct targeting via NodePort on localhost
+TARGET_URL="http://localhost:8000"
 
-info "Detected Target IP: ${YELLOW}${POD_IP}${NC}"
+info "Targeting Multi-Node Entrypoint: ${YELLOW}${TARGET_URL}${NC}"
 
-# Inject the IP into the k6 script
-# Note: spike-test.js uses direct IP:8000 to bypass Ingress overhead
+# Update k6 script to hit the NodePort entrypoint
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  sed -i '' "s/http:\/\/[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
+  sed -i '' "s|http://[0-9.]*:[0-9]*|${TARGET_URL}|" "$STRESS_TEST_FILE"
 else
-  sed -i "s/http:\/\/[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
+  sed -i "s|http://[0-9.]*:[0-9]*|${TARGET_URL}|" "$STRESS_TEST_FILE"
 fi
 
-success "System is primed for 10,000 VUs with Write-Behind logic active."
+success "Multi-node system (3 Agents) is primed."
 
 # ── 4. Execution ─────────────────────────────────────────────────────────────
 echo -e "${YELLOW}🚀 Launching k6 Spike Test...${NC}"
-# Run with summary output to verify thresholds: p(95)<2s and rate<1%
 k6 run "$STRESS_TEST_FILE"
