@@ -63,11 +63,14 @@ The following results were achieved during the final 5-minute spike test using t
 | Throughput | N/A | 565.7 reqs/s | ✅ OPTIMIZED |
 
 k6 Summary Output
+
   █ THRESHOLDS
+  
     http_req_duration..................: ✓ 'p(95)<2000' p(95)=2.85ms
     http_req_failed....................: ✓ 'rate<0.01'  rate=0.00%
 
   █ TOTAL RESULTS
+  
     checks_total.......................: 160895
     checks_succeeded...................: 100.00%
     vus................................: 10000 (Max)
