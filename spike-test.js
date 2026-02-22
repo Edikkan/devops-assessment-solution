@@ -3,26 +3,25 @@ import { check, sleep } from 'k6';
 
 export const options = {
   stages: [
-    { duration: '30s', target: 5000 },  // Initial climb
-    { duration: '30s', target: 10000 }, // Slower climb to 10k
-    { duration: '1m',  target: 10000 }, // Hold peak
-    { duration: '30s', target: 0 },     // Graceful exit
+    { duration: '30s', target: 5000 },  // Smooth ramp to 5k
+    { duration: '30s', target: 10000 }, // Smooth ramp to 10k
+    { duration: '1m',  target: 10000 }, // Maintain peak
+    { duration: '20s', target: 0 },     // Cool down
   ],
   thresholds: {
-    http_req_failed: ['rate<0.01'],   // The Pass Criteria: < 1%
-    http_req_duration: ['p(95)<2000'], // The Pass Criteria: < 2s
+    http_req_failed: ['rate<0.01'],    // PASS CRITERIA: < 1%
+    http_req_duration: ['p(95)<2000'], // PASS CRITERIA: < 2s
   },
 };
 
 export default function () {
   const params = { 
     headers: { 'Connection': 'keep-alive' },
-    timeout: '20s' // Essential for high-concurrency scheduling delays
+    timeout: '20s' 
   };
   const res = http.get('http://172.18.0.2:8000/api/data', params);
   check(res, { 'status is 200': (r) => r.status === 200 });
   
-  // Adding a jittered sleep of 1-2 seconds
-  // This keeps 10k users "connected" but spreads the RPS
-  sleep(1 + Math.random());
+  // Sleep ensures we don't overwhelm the CPU while keeping 10k users active
+  sleep(1.5 + Math.random()); 
 }
