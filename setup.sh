@@ -17,10 +17,14 @@ die()     { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 # ── 0. Host Kernel Hardening (Crucial for 10k VUs) ───────────────────────────
 info "Hardening Host Kernel for high concurrency..."
 # Opening the "Waiting Room" for TCP connections
-sudo sysctl -w net.core.somaxconn=20000 >/dev/null
-sudo sysctl -w net.ipv4.tcp_max_syn_backlog=20000 >/dev/null
-# Faster socket recycling
+sudo sysctl -w net.core.somaxconn=32768 >/dev/null
+sudo sysctl -w net.ipv4.tcp_max_syn_backlog=32768 >/dev/null
+
+# Faster socket recycling and port range expansion to prevent EOF errors
 sudo sysctl -w net.ipv4.tcp_tw_reuse=1 >/dev/null
+sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535" >/dev/null
+sudo sysctl -w net.ipv4.tcp_fin_timeout=15 >/dev/null
+
 # Increasing file descriptors for 10k simultaneous sockets
 ulimit -n 100000 || warn "Could not set ulimit automatically. Ensure /etc/security/limits.conf is updated."
 
@@ -50,23 +54,26 @@ kubectl apply -f k8s/app/combined-app.yaml
 kubectl rollout status deployment/app-python -n "${NAMESPACE}" --timeout=120s
 
 # ── 3. Automated Bridge ──────────────────────────────────────────────────────
-info "Stabilizing Network (5s pause)..."
-sleep 5
+info "Stabilizing Network (10s pause for connection pools)..."
+sleep 10
 
-POD_IP=$(kubectl get pods -n "${NAMESPACE}" -l app=app-python -o jsonpath='{.items[0].status.podIP}')
-[ -z "$POD_IP" ] && die "Could not retrieve Pod IP."
+# In hostNetwork mode, the Pod IP is the VM IP. We target the specific 8000 port.
+POD_IP=$(kubectl get pods -n "${NAMESPACE}" -l app=app-python -o jsonpath='{.items[0].status.hostIP}')
+[ -z "$POD_IP" ] && die "Could not retrieve Host/Pod IP."
 
-info "Detected Pod IP: ${YELLOW}${POD_IP}${NC}"
+info "Detected Target IP: ${YELLOW}${POD_IP}${NC}"
 
 # Inject the IP into the k6 script
+# Note: spike-test.js uses direct IP:8000 to bypass Ingress overhead
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  sed -i '' "s/http:\/\/172.18.[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
+  sed -i '' "s/http:\/\/[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
 else
-  sed -i "s/http:\/\/172.18.[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
+  sed -i "s/http:\/\/[0-9.]*:[0-9]*/http:\/\/${POD_IP}:8000/" "$STRESS_TEST_FILE"
 fi
 
-success "System is primed for 10,000 VUs."
+success "System is primed for 10,000 VUs with Write-Behind logic active."
 
 # ── 4. Execution ─────────────────────────────────────────────────────────────
 echo -e "${YELLOW}🚀 Launching k6 Spike Test...${NC}"
+# Run with summary output to verify thresholds: p(95)<2s and rate<1%
 k6 run "$STRESS_TEST_FILE"
