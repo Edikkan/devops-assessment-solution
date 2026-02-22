@@ -15,6 +15,7 @@ When I performed the baseline stress test, the system failed almost immediately 
 3. The Solution: "Write-Behind" Architecture
 
 3.1 What I Chose and Why
+
 I chose to implement a Write-Behind (Asynchronous) pattern using Redis Streams.
 
  * Redis as a High-Speed Buffer: Instead of the app talking directly to MongoDB, I modified the Python code to push data into a Redis Stream. Redis is memory-bound and can handle the 10,000 VU ingestion rate effortlessly compared to disk-bound MongoDB.
