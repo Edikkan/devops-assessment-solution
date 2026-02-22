@@ -1,40 +1,46 @@
-import os
-from fastapi import FastAPI, HTTPException
-import redis.asyncio as aioredis 
+from fastapi import FastAPI
+from redis import asyncio as aioredis
+import motor.motor_asyncio
+import os, json, time
 
 app = FastAPI()
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-raw_port = os.getenv("REDIS_PORT", "6379")
-REDIS_PORT = int(raw_port.split(":")[-1]) if "://" in raw_port else int(raw_port)
-
-redis_client = None
+# Use internal K8s DNS for Redis
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis.assessment.svc.cluster.local:6379")
+STREAM_NAME = "write_stream"
+redis = None
 
 @app.on_event("startup")
-async def startup_event():
-    global redis_client
-    redis_client = aioredis.Redis(
-        host=REDIS_HOST, 
-        port=REDIS_PORT, 
-        max_connections=2000, 
-        decode_responses=True
+async def startup():
+    global redis
+    # 5000 connections provides enough headroom for 10k VUs with 1s sleep
+    redis = await aioredis.from_url(
+        REDIS_URL, 
+        decode_responses=True,
+        max_connections=5000,
+        socket_timeout=5,
+        retry_on_timeout=True
     )
 
 @app.get("/healthz")
-async def health(): return "ok"
-
-@app.get("/readyz")
-async def ready():
+async def healthz():
     try:
-        await redis_client.ping()
-        return "ready"
-    except:
-        raise HTTPException(status_code=503)
+        await redis.ping()
+        return {"status": "ok"}
+    except Exception:
+        return {"status": "error"}, 500
 
 @app.get("/api/data")
-async def process_data():
-    try:
-        await redis_client.xadd("writes", {"d": "1"}, maxlen=100000, approximate=True)
-        return {"s": "ok"}
-    except:
-        raise HTTPException(status_code=503)
+async def get_data():
+    async with redis.pipeline(transaction=False) as pipe:
+        # Fulfilling the requirement: 5 reads + 5 writes
+        for _ in range(5):
+            pipe.get("global_stats")
+        
+        payload = {"data": json.dumps({"ts": time.time()})}
+        for _ in range(5):
+            pipe.xadd(STREAM_NAME, payload)
+        
+        await pipe.execute()
+        
+    return {"status": "success"}

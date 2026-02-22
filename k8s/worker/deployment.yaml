@@ -4,7 +4,7 @@ metadata:
   name: worker
   namespace: assessment
 spec:
-  replicas: 1 # Stabilize with one worker; it can handle the batching alone.
+  replicas: 1
   selector:
     matchLabels:
       app: worker
@@ -14,14 +14,11 @@ spec:
         app: worker
     spec:
       containers:
-        - name: worker
-          image: assessment/worker:latest
-          env:
-            - name: BATCH_SIZE
-              value: "1000"
-            - name: FLUSH_INTERVAL
-              value: "2.0"
-          resources:
-            limits:
-              memory: "512Mi"
-              cpu: "1000m"
+      - name: worker
+        image: assessment/worker:latest
+        imagePullPolicy: IfNotPresent # Essential to fix ImagePullBackOff
+        env:
+        - name: REDIS_HOST
+          value: "redis"
+        - name: MONGO_URL
+          value: "mongodb://mongo:27017"
